@@ -8,6 +8,11 @@ typedef struct {
     void (*button)(app_runtime_t *runtime, unsigned button, bool pressed);
 } app_definition_t;
 
+static void mouse_app_button(app_runtime_t *runtime, unsigned button, bool pressed)
+{
+    mouse_button(&runtime->mouse, button, pressed);
+}
+
 static void placeholder_button(app_runtime_t *runtime, unsigned button, bool pressed)
 {
     if (button < 3 && pressed) ++runtime->presses;
@@ -16,7 +21,7 @@ static void placeholder_button(app_runtime_t *runtime, unsigned button, bool pre
 /* Apps are built into the firmware. Only the active app has a runtime. */
 static const app_definition_t apps[JINTAI_APP_COUNT] = {
     { .name = "INPUT LAB" },
-    { .name = "APP ONE", .button = placeholder_button },
+    { .name = "MOUSE", .button = mouse_app_button },
     { .name = "APP TWO", .button = placeholder_button },
     { .name = "APP THREE", .button = placeholder_button },
 };

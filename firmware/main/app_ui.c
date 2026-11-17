@@ -155,6 +155,16 @@ void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
         text_at(26, 425, "RELEASE SW KEYS TO SWITCH", 2, muted);
     } else if (state->app.current == 0) {
         draw_diagnostics(state);
+    } else if (state->app.current == 1) {
+        rect(0, 0, WIDTH, HEIGHT, bg);
+        rect(0, 0, WIDTH, 6, accent);
+        text_at(26, 28, "MOUSE", 3, white);
+        rect(26, 100, 588, 252, card);
+        text_at(46, 125, "MODE", 2, muted);
+        text_at(46, 160, state->app.mouse_scroll ? "SCROLL" : "CURSOR", 4, accent);
+        text_at(46, 225, "SW1 MODE  SW2 RIGHT  SW3 LEFT", 2, white);
+        text_at(46, 265, "SW1 SW2 BACK  SW2 SW3 FORWARD", 2, white);
+        text_at(26, 425, "HOLD SW1 SW2 SW3 FOR APPS", 2, muted);
     } else {
         rect(0, 0, WIDTH, HEIGHT, bg);
         rect(0, 0, WIDTH, 6, accent);

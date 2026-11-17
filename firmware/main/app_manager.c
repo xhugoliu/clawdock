@@ -33,6 +33,8 @@ static void block_input(app_manager_t *m)
 
 void app_manager_wake(app_manager_t *manager)
 {
+    if (manager->view.current == 1) mouse_release(&manager->runtime.mouse);
+    manager->mouse_chord = 0;
     block_input(manager);
 }
 
@@ -40,10 +42,28 @@ static void deliver_button(app_manager_t *m, unsigned button, bool pressed)
 {
     app_button(&m->runtime, m->view.current, button, pressed);
     m->view.presses = m->runtime.presses;
+    m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
 }
 
 static void flush_pending(app_manager_t *m)
 {
+    if (m->view.current == 1) {
+        unsigned seen = 0, held = 0;
+        for (unsigned i = 0; i < m->pending_count; ++i) {
+            unsigned bit = 1U << m->pending[i].button;
+            if (m->pending[i].pressed) { seen |= bit; held |= bit; }
+            else held &= ~bit;
+        }
+        if (seen == 3 || seen == 6) {
+            mouse_chord(&m->runtime.mouse, seen, true);
+            if (held & seen) m->mouse_chord = seen;
+            else mouse_chord(&m->runtime.mouse, seen, false);
+            m->pending_count = 0;
+            m->chord_pending = false;
+            m->chord_locked = true;
+            return;
+        }
+    }
     for (unsigned i = 0; i < m->pending_count; ++i)
         deliver_button(m, m->pending[i].button, m->pending[i].pressed);
     m->pending_count = 0;
@@ -57,6 +77,7 @@ static void select_current(app_manager_t *m)
         m->view.current = m->view.selected;
         app_start(&m->runtime, m->view.current);
         m->view.presses = m->runtime.presses;
+        m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
     }
     m->view.choosing = false;
     block_input(m);
@@ -102,10 +123,27 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
         return;
     }
 
+    if (m->mouse_chord) {
+        if (switches_released(in)) {
+            mouse_chord(&m->runtime.mouse, m->mouse_chord, false);
+            m->mouse_chord = 0;
+            m->chord_locked = false;
+        }
+        return;
+    }
+
     /* Once events were delivered, a late third switch cannot start a chord. */
     if (m->chord_pending && now_ms > m->chord_deadline_ms) {
         flush_pending(m);
         m->chord_locked = true;
+        if (m->mouse_chord) {
+            if (switches_released(in)) {
+                mouse_chord(&m->runtime.mouse, m->mouse_chord, false);
+                m->mouse_chord = 0;
+                m->chord_locked = false;
+            }
+            return;
+        }
     }
     for (unsigned i = 0; i < 3; ++i) {
         if (in->buttons[i] == old[i]) continue;
@@ -129,6 +167,7 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
     if (m->chord_pending && switches_pressed(in)) {
         m->chord_pending = false;
         m->pending_count = 0;
+        if (m->view.current == 1) mouse_release(&m->runtime.mouse);
         m->view.choosing = true;
         m->view.selected = m->view.current;
         m->navigation_armed = true;

@@ -5,6 +5,7 @@
 #include "display.h"
 #include "joystick.h"
 #include "touch.h"
+#include "usb_mouse.h"
 
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
@@ -39,6 +40,17 @@ static button_t buttons[] = {
 };
 
 static QueueHandle_t display_queue;
+
+/* USB-UART bridge uses the same reports as native HID; diagnostics use other lines. */
+static void output_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel, int8_t pan)
+{
+    static uint8_t previous;
+    usb_mouse_report(buttons, x, y, wheel, pan);
+    if (buttons != previous || x || y || wheel || pan) {
+        printf("JT_MOUSE %u %d %d %d %d\n", buttons, x, y, wheel, pan);
+        previous = buttons;
+    }
+}
 
 static void display_task(void *unused)
 {
@@ -165,6 +177,9 @@ void app_main(void)
         display_queue = NULL;
     }
 
+    esp_err_t usb_status = usb_mouse_init();
+    if (usb_status != ESP_OK) printf("USB mouse init failed: %s\n", esp_err_to_name(usb_status));
+
     app_manager_t apps;
     app_manager_init(&apps);
     bool system_awake = true;
@@ -215,7 +230,7 @@ void app_main(void)
                 next_touch_log = now + 1000000;
             }
         }
-        if (display_queue) {
+        {
             lab_display_state_t state = { .touch = touch, .adc_ok = x_result == ESP_OK && y_result == ESP_OK };
             for (size_t i = 0; i < 4; ++i) state.buttons[i] = buttons[i].stable_pressed;
             if (state.adc_ok) {
@@ -250,6 +265,20 @@ void app_main(void)
                     printf("app t_ms=%lld current=%s selecting=%s selected=%s\n", (long long)(now / 1000),
                            app_name(apps.view.current), apps.view.choosing ? "yes" : "no", app_name(apps.view.selected));
                 }
+                /* Preserve every button edge, including press/release within the chord window. */
+                if (previous_app.current == 1 && apps.view.current != 1)
+                    output_mouse_report(0, 0, 0, 0, 0);
+                if (apps.view.current == 1) {
+                    uint8_t button_state;
+                    while (mouse_peek(&apps.runtime.mouse, &button_state)) {
+                        output_mouse_report(button_state, 0, 0, 0, 0);
+                        mouse_pop(&apps.runtime.mouse);
+                    }
+                    int8_t dx = 0, dy = 0, wheel = 0, pan = 0;
+                    if (!apps.view.choosing && !apps.input_blocked && input.joystick_ready)
+                        mouse_motion(&apps.runtime.mouse, input.joystick_x, input.joystick_y, &dx, &dy, &wheel, &pan);
+                    output_mouse_report(apps.runtime.mouse.buttons, dx, dy, wheel, pan);
+                }
                 if (previous_app.current != apps.view.current) {
                     /* Touch maximum is diagnostic application state, not a system lifetime statistic. */
                     touch.max_reported = touch.reported;
@@ -258,7 +287,7 @@ void app_main(void)
                 }
             }
             state.app = apps.view;
-            xQueueOverwrite(display_queue, &state);
+            if (display_queue) xQueueOverwrite(display_queue, &state);
         }
         if (esp_timer_get_time() >= report_at) {
             if (diagnostics && min_x == INT32_MAX) {

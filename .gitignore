@@ -3,3 +3,5 @@ firmware/.pio/
 firmware/sdkconfig.p4_v3
 firmware/managed_components/
 firmware/recovery/
+
+host/JintaiMouse.app/

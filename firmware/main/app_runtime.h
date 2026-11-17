@@ -1,10 +1,12 @@
 #pragma once
 #include <stdbool.h>
+#include "mouse.h"
 
 #define JINTAI_APP_COUNT 4
 
 typedef struct {
     unsigned presses;
+    mouse_t mouse;
 } app_runtime_t;
 
 const char *app_name(unsigned app);

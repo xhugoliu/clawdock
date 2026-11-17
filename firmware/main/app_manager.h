@@ -19,6 +19,7 @@ typedef struct {
     unsigned selected;
     bool choosing;
     unsigned presses;
+    bool mouse_scroll;
 } app_view_t;
 
 typedef struct {
@@ -29,6 +30,7 @@ typedef struct {
     bool navigation_armed;
     bool chord_pending;
     bool chord_locked;
+    unsigned mouse_chord;
     int64_t chord_deadline_ms;
     struct { unsigned button; bool pressed; } pending[6];
     unsigned pending_count;
