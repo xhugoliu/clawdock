@@ -97,7 +97,7 @@ static void display_task(void *unused)
     }
 }
 
-static bool sample_buttons(void)
+static bool sample_buttons(bool diagnostics)
 {
     bool activity = false;
     for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
@@ -112,7 +112,7 @@ static bool sample_buttons(void)
         if (b->candidate_samples >= DEBOUNCE_SAMPLES && pressed != b->stable_pressed) {
             b->stable_pressed = pressed;
             activity = true;
-            printf("button t_ms=%lld name=%s state=%s\n",
+            if (diagnostics) printf("button t_ms=%lld name=%s state=%s\n",
                    (long long)(esp_timer_get_time() / 1000), b->name,
                    pressed ? "pressed" : "released");
         }
@@ -165,6 +165,9 @@ void app_main(void)
         display_queue = NULL;
     }
 
+    app_manager_t apps;
+    app_manager_init(&apps);
+    bool system_awake = true;
     lab_joystick_cal_t joystick = {0};
     int min_x = INT32_MAX, max_x = INT32_MIN;
     int min_y = INT32_MAX, max_y = INT32_MIN;
@@ -173,7 +176,8 @@ void app_main(void)
     int64_t last_activity = esp_timer_get_time();
     TickType_t last_sample = xTaskGetTickCount();
     while (true) {
-        bool activity = sample_buttons();
+        bool diagnostics = apps.view.current == 0 && !apps.view.choosing;
+        bool activity = sample_buttons(diagnostics);
         int x, y;
         esp_err_t x_result = adc_oneshot_read(adc, ADC1_GPIO21_CHANNEL, &x);
         esp_err_t y_result = adc_oneshot_read(adc, ADC1_GPIO20_CHANNEL, &y);
@@ -190,11 +194,13 @@ void app_main(void)
             ++errors;
         }
         if (touch_init == ESP_OK) {
+            uint8_t diagnostic_max = touch.max_reported;
             esp_err_t touch_err = lab_touch_read(&touch);
+            if (!diagnostics) touch.max_reported = diagnostic_max;
             if (touch_err != ESP_OK && touch.errors == 1)
                 printf("touch read failed: %s\n", esp_err_to_name(touch_err));
             int64_t now = esp_timer_get_time();
-            if (touch_err == ESP_OK && (touch.reported != previous_count || touch.valid != previous_valid ||
+            if (touch_err == ESP_OK && diagnostics && (touch.reported != previous_count || touch.valid != previous_valid ||
                 (touch.reported && now >= next_touch_log))) {
                 printf("touch t_ms=%lld reported=%u valid=%u max=%u errors=%lu raw=",
                        (long long)(now / 1000), touch.reported, touch.valid,
@@ -225,18 +231,45 @@ void app_main(void)
             if (activity) last_activity = now;
             state.awake = now - last_activity < SCREEN_IDLE_US;
             state.sleep_warning = state.awake && now - last_activity >= SCREEN_IDLE_US - SCREEN_WARNING_US;
+            if (state.awake && !system_awake) app_manager_wake(&apps);
+            system_awake = state.awake;
+            if (state.awake) {
+                app_input_t input = {
+                    .joystick_ready = state.adc_ok && state.joystick_calibrated,
+                    .joystick_x = state.normalized_x,
+                    .joystick_y = state.normalized_y,
+                    .touch_available = touch_init == ESP_OK,
+                    .touch_ready = touch.ready,
+                    .touch_count = touch.reported,
+                };
+                for (unsigned i = 0; i < 4; ++i) input.buttons[i] = state.buttons[i];
+                app_view_t previous_app = apps.view;
+                app_manager_update(&apps, &input, now / 1000);
+                if (previous_app.choosing != apps.view.choosing || previous_app.current != apps.view.current ||
+                    previous_app.selected != apps.view.selected) {
+                    printf("app t_ms=%lld current=%s selecting=%s selected=%s\n", (long long)(now / 1000),
+                           app_name(apps.view.current), apps.view.choosing ? "yes" : "no", app_name(apps.view.selected));
+                }
+                if (previous_app.current != apps.view.current) {
+                    /* Touch maximum is diagnostic application state, not a system lifetime statistic. */
+                    touch.max_reported = touch.reported;
+                    state.touch.max_reported = touch.max_reported;
+                    previous_count = previous_valid = 255;
+                }
+            }
+            state.app = apps.view;
             xQueueOverwrite(display_queue, &state);
         }
         if (esp_timer_get_time() >= report_at) {
-            if (min_x == INT32_MAX) {
+            if (diagnostics && min_x == INT32_MAX) {
                 printf("adc t_ms=%lld no_valid_samples errors=%u\n",
                        (long long)(esp_timer_get_time() / 1000), errors);
-            } else {
+            } else if (diagnostics) {
                 printf("adc t_ms=%lld x_min=%d x_max=%d y_min=%d y_max=%d errors=%u heap_free=%u\n",
                        (long long)(esp_timer_get_time() / 1000), min_x, max_x,
                        min_y, max_y, errors, (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             }
-            if (joystick.ready && x_result == ESP_OK && y_result == ESP_OK)
+            if (diagnostics && joystick.ready && x_result == ESP_OK && y_result == ESP_OK)
                 printf("joystick center=%d,%d observed_x=%d,%d observed_y=%d,%d normalized=%d,%d\n",
                        joystick.center_x, joystick.center_y, joystick.min_x, joystick.max_x,
                        joystick.min_y, joystick.max_y,

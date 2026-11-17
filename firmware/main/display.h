@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "touch.h"
+#include "app_manager.h"
 
 typedef struct {
     bool buttons[4];
@@ -14,6 +15,7 @@ typedef struct {
     bool awake;
     bool sleep_warning;
     lab_touch_state_t touch;
+    app_view_t app;
 } lab_display_state_t;
 
 esp_err_t lab_display_init(void);
