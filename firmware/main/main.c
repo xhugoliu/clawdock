@@ -20,6 +20,8 @@
 #define SAMPLE_MS 20
 #define REPORT_MS 1000
 #define DEBOUNCE_SAMPLES 3
+#define SCREEN_IDLE_US (10LL * 60 * 1000000)
+#define SCREEN_WARNING_US (5LL * 1000000)
 
 typedef struct {
     const char *name;
@@ -48,10 +50,43 @@ static void display_task(void *unused)
         return;
     }
     lab_display_state_t state = {0};
+    bool awake = true;
+    bool warning_shown = false;
     TickType_t last = xTaskGetTickCount();
     while (true) {
         if (xQueuePeek(display_queue, &state, 0) == pdTRUE) {
-            status = lab_display_update(&state);
+            status = ESP_OK;
+            if (!state.awake && awake) {
+                status = lab_display_set_awake(false);
+                if (status == ESP_OK) {
+                    awake = false;
+                    warning_shown = false;
+                    printf("display sleep t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
+                }
+            } else if (state.awake) {
+                if (state.sleep_warning) {
+                    if (!warning_shown) {
+                        status = lab_display_sleep_warning();
+                        if (status == ESP_OK) {
+                            warning_shown = true;
+                            printf("display sleep warning t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
+                        }
+                    }
+                } else {
+                    if (warning_shown) {
+                        warning_shown = false;
+                        printf("display sleep canceled t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
+                    }
+                    status = lab_display_update(&state);
+                }
+                if (status == ESP_OK && !awake) {
+                    status = lab_display_set_awake(true);
+                    if (status == ESP_OK) {
+                        awake = true;
+                        printf("display wake t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
+                    }
+                }
+            }
             if (status != ESP_OK) {
                 printf("display update failed: %s\n", esp_err_to_name(status));
                 vTaskDelete(NULL);
@@ -62,8 +97,9 @@ static void display_task(void *unused)
     }
 }
 
-static void sample_buttons(void)
+static bool sample_buttons(void)
 {
+    bool activity = false;
     for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
         button_t *b = &buttons[i];
         bool pressed = gpio_get_level(b->pin) == 0;
@@ -75,11 +111,14 @@ static void sample_buttons(void)
         }
         if (b->candidate_samples >= DEBOUNCE_SAMPLES && pressed != b->stable_pressed) {
             b->stable_pressed = pressed;
+            activity = true;
             printf("button t_ms=%lld name=%s state=%s\n",
                    (long long)(esp_timer_get_time() / 1000), b->name,
                    pressed ? "pressed" : "released");
         }
+        if (b->stable_pressed) activity = true;
     }
+    return activity;
 }
 
 void app_main(void)
@@ -131,9 +170,10 @@ void app_main(void)
     int min_y = INT32_MAX, max_y = INT32_MIN;
     unsigned int errors = 0;
     int64_t report_at = esp_timer_get_time() + REPORT_MS * 1000LL;
+    int64_t last_activity = esp_timer_get_time();
     TickType_t last_sample = xTaskGetTickCount();
     while (true) {
-        sample_buttons();
+        bool activity = sample_buttons();
         int x, y;
         esp_err_t x_result = adc_oneshot_read(adc, ADC1_GPIO21_CHANNEL, &x);
         esp_err_t y_result = adc_oneshot_read(adc, ADC1_GPIO20_CHANNEL, &y);
@@ -178,8 +218,13 @@ void app_main(void)
                 if (joystick.ready) {
                     state.normalized_x = lab_joystick_normalize(x, joystick.center_x, joystick.min_x, joystick.max_x);
                     state.normalized_y = lab_joystick_normalize(y, joystick.center_y, joystick.min_y, joystick.max_y);
+                    if (state.normalized_x != 0 || state.normalized_y != 0) activity = true;
                 }
             }
+            int64_t now = esp_timer_get_time();
+            if (activity) last_activity = now;
+            state.awake = now - last_activity < SCREEN_IDLE_US;
+            state.sleep_warning = state.awake && now - last_activity >= SCREEN_IDLE_US - SCREEN_WARNING_US;
             xQueueOverwrite(display_queue, &state);
         }
         if (esp_timer_get_time() >= report_at) {

@@ -58,7 +58,7 @@ static void rect(int x, int y, int w, int h, uint16_t color)
             pixel(xx, yy, color);
 }
 
-/* 5x7 uppercase/numeric glyphs used by this diagnostic screen. */
+/* 5x7 glyphs used by the diagnostic screen and sleep warning. */
 static const uint8_t font[][7] = {
     {14,17,19,21,25,17,14}, {4,12,4,4,4,4,14}, {14,17,1,2,4,8,31},
     {30,1,1,14,1,1,30}, {2,6,10,18,31,2,2}, {31,16,16,30,1,1,30},
@@ -72,20 +72,46 @@ static const uint8_t font[][7] = {
     {30,17,17,30,16,16,16}, {14,17,17,17,21,18,13}, {30,17,17,30,20,18,17},
     {15,16,16,14,1,1,30}, {31,4,4,4,4,4,4}, {17,17,17,17,17,17,14},
     {17,17,17,17,17,10,4}, {17,17,17,21,21,21,10}, {17,17,10,4,10,17,17},
-    {17,17,10,4,4,4,4}, {31,1,2,4,8,16,31}, {0,0,0,31,0,0,0}
+    {17,17,10,4,4,4,4}, {31,1,2,4,8,16,31}, {0,0,0,31,0,0,0},
+    {0,0,31,2,4,8,31}, {0,0,0,0,0,6,6}
 };
 
 static void text_at(int x, int y, const char *s, int scale, uint16_t color)
 {
     for (; *s; ++s, x += 6 * scale) {
         int index = *s >= '0' && *s <= '9' ? *s - '0' :
-                    *s >= 'A' && *s <= 'Z' ? 10 + *s - 'A' : *s == '-' ? 36 : -1;
+                    *s >= 'A' && *s <= 'Z' ? 10 + *s - 'A' :
+                    *s == '-' ? 36 : *s == 'z' ? 37 : *s == '.' ? 38 : -1;
         if (index < 0) continue;
         for (int row = 0; row < 7; ++row)
             for (int col = 0; col < 5; ++col)
                 if (font[index][row] & (1 << (4 - col)))
                     rect(x + col * scale, y + row * scale, scale, scale, color);
     }
+}
+
+static esp_err_t submit_frame(void)
+{
+    /* Wait two refreshes before reusing the previous front buffer. */
+    while (xSemaphoreTake(refresh_done, 0) == pdTRUE) {}
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel, 0, 0, PANEL_WIDTH, PANEL_HEIGHT, fb),
+                        TAG, "submit framebuffer");
+    for (int i = 0; i < 2; ++i) {
+        ESP_RETURN_ON_FALSE(xSemaphoreTake(refresh_done, pdMS_TO_TICKS(250)) == pdTRUE,
+                            ESP_ERR_TIMEOUT, TAG, "display refresh timeout");
+    }
+    draw_index ^= 1;
+    fb = framebuffers[draw_index];
+    return ESP_OK;
+}
+
+esp_err_t lab_display_sleep_warning(void)
+{
+    if (!fb) return ESP_ERR_INVALID_STATE;
+    rect(0, 0, WIDTH, HEIGHT, rgb(0, 0, 0));
+    /* Six 5x7 glyphs with one column of spacing, centered on the screen. */
+    text_at((WIDTH - 35 * 10) / 2, (HEIGHT - 7 * 10) / 2, "Zzz...", 10, rgb(255, 255, 255));
+    return submit_frame();
 }
 
 esp_err_t lab_display_init(void)
@@ -147,6 +173,20 @@ esp_err_t lab_display_init(void)
     ESP_RETURN_ON_ERROR(lab_display_update(&initial), TAG, "first frame");
     ESP_RETURN_ON_ERROR(gpio_set_level(GPIO_NUM_26, 1), TAG, "backlight on");
     ESP_LOGI(TAG, "display initialized 640x480 landscape");
+    return ESP_OK;
+}
+
+esp_err_t lab_display_set_awake(bool awake)
+{
+    if (!awake) {
+        ESP_RETURN_ON_ERROR(gpio_set_level(GPIO_NUM_26, 0), TAG, "backlight off");
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel, false), TAG, "panel off");
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_sleep(panel, true), TAG, "panel sleep");
+    } else {
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_sleep(panel, false), TAG, "panel wake");
+        ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel, true), TAG, "panel on");
+        ESP_RETURN_ON_ERROR(gpio_set_level(GPIO_NUM_26, 1), TAG, "backlight on");
+    }
     return ESP_OK;
 }
 
@@ -218,16 +258,5 @@ esp_err_t lab_display_update(const lab_display_state_t *state)
         circle(touch->points[i].x, touch->points[i].y, 22, touch_colors[i]);
         rect((int)touch->points[i].x - 2, (int)touch->points[i].y - 2, 5, 5, touch_colors[i]);
     }
-    /* Commit the completed back buffer; wait two refreshes before reusing the
-     * previous front buffer because DMA changes buffers at a frame boundary. */
-    while (xSemaphoreTake(refresh_done, 0) == pdTRUE) {}
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel, 0, 0, PANEL_WIDTH, PANEL_HEIGHT, fb),
-                        TAG, "submit framebuffer");
-    for (int i = 0; i < 2; ++i) {
-        ESP_RETURN_ON_FALSE(xSemaphoreTake(refresh_done, pdMS_TO_TICKS(250)) == pdTRUE,
-                            ESP_ERR_TIMEOUT, TAG, "display refresh timeout");
-    }
-    draw_index ^= 1;
-    fb = framebuffers[draw_index];
-    return ESP_OK;
+    return submit_frame();
 }

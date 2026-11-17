@@ -11,8 +11,12 @@ typedef struct {
     bool joystick_calibrated;
     int normalized_x;
     int normalized_y;
+    bool awake;
+    bool sleep_warning;
     lab_touch_state_t touch;
 } lab_display_state_t;
 
 esp_err_t lab_display_init(void);
 esp_err_t lab_display_update(const lab_display_state_t *state);
+esp_err_t lab_display_sleep_warning(void);
+esp_err_t lab_display_set_awake(bool awake);
