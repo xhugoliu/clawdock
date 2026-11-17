@@ -5,6 +5,7 @@
 #include "display.h"
 #include "joystick.h"
 #include "touch.h"
+#include "touchpad.h"
 #include "usb_mouse.h"
 
 #include "driver/gpio.h"
@@ -184,6 +185,7 @@ void app_main(void)
     app_manager_init(&apps);
     bool system_awake = true;
     lab_joystick_cal_t joystick = {0};
+    touchpad_t touchpad = {0};
     int min_x = INT32_MAX, max_x = INT32_MIN;
     int min_y = INT32_MAX, max_y = INT32_MIN;
     unsigned int errors = 0;
@@ -242,6 +244,8 @@ void app_main(void)
                     if (state.normalized_x != 0 || state.normalized_y != 0) activity = true;
                 }
             }
+            /* Touch only wakes and keeps the display awake in the mouse app. */
+            if (apps.view.current == 1 && touch.ready && touch.reported) activity = true;
             int64_t now = esp_timer_get_time();
             if (activity) last_activity = now;
             state.awake = now - last_activity < SCREEN_IDLE_US;
@@ -280,6 +284,19 @@ void app_main(void)
                                  motion_active ? input.joystick_y : 0, now / 1000,
                                  &dx, &dy, &wheel, &pan);
                     output_mouse_report(apps.runtime.mouse.buttons, dx, dy, wheel, pan);
+                    bool touch_active = !apps.view.choosing && !apps.input_blocked;
+                    if (touch_active) {
+                        touchpad_output_t gesture;
+                        touchpad_update(&touchpad, &touch, now / 1000, &gesture);
+                        if (gesture.dx || gesture.dy || gesture.wheel || gesture.pan)
+                            output_mouse_report(apps.runtime.mouse.buttons, gesture.dx, gesture.dy, gesture.wheel, gesture.pan);
+                        if (gesture.scroll_x || gesture.scroll_y)
+                            printf("JT_TOUCH_SCROLL %d %d\n", gesture.scroll_x, gesture.scroll_y);
+                        if (gesture.click && !(apps.runtime.mouse.buttons & gesture.click)) {
+                            output_mouse_report(apps.runtime.mouse.buttons | gesture.click, 0, 0, 0, 0);
+                            output_mouse_report(apps.runtime.mouse.buttons, 0, 0, 0, 0);
+                        }
+                    } else touchpad_reset(&touchpad);
                     /* Send calibrated stick positions at the sampling rate for pixel scrolling. */
                     static bool scroll_active;
                     int sx = motion_active && apps.runtime.mouse.scroll_mode ? input.joystick_x : 0;
@@ -288,6 +305,7 @@ void app_main(void)
                     scroll_active = sx || sy;
                 }
                 if (previous_app.current != apps.view.current) {
+                    touchpad_reset(&touchpad);
                     /* Touch maximum is diagnostic application state, not a system lifetime statistic. */
                     touch.max_reported = touch.reported;
                     state.touch.max_reported = touch.max_reported;

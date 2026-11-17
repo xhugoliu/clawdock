@@ -17,6 +17,7 @@
 - [2026-11-17：摇杆转圈与示意图校准](experiments/2026-11-17-joystick-visualization.md)
 - [2026-11-17：内置应用与选择器实机检查](experiments/2026-11-17-app-switching.md)
 - [2026-11-17：USB 鼠标应用构建与设备启动](experiments/2026-11-17-usb-mouse.md)
+- [2026-11-17：鼠标应用触控板](experiments/2026-11-17-touchpad.md)
 
 ## 计划
 

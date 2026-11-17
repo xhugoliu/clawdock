@@ -1,5 +1,6 @@
 import Foundation
 import ApplicationServices
+import AppKit
 import Darwin
 
 let debug = ProcessInfo.processInfo.environment["JINTAI_MOUSE_DEBUG"] == "1"
@@ -32,8 +33,13 @@ let buttonDefs: [(Int, CGMouseButton, CGEventType, CGEventType)] = [
     (16, CGMouseButton(rawValue: 4)!, .otherMouseDown, .otherMouseUp)
 ]
 func mousePosition() -> CGPoint { CGEvent(source: source)?.location ?? .zero }
-func postMouse(_ type: CGEventType, _ button: CGMouseButton, _ position: CGPoint) {
-    CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: position, mouseButton: button)?.post(tap: .cghidEventTap)
+struct ClickHistory { var time: TimeInterval; var position: CGPoint; var count: Int64 }
+var clickHistory: [Int: ClickHistory] = [:]
+func postMouse(_ type: CGEventType, _ button: CGMouseButton, _ position: CGPoint, clickCount: Int64? = nil) {
+    guard !suppressEvents, let event = CGEvent(mouseEventSource: source, mouseType: type,
+                                               mouseCursorPosition: position, mouseButton: button) else { return }
+    if let clickCount { event.setIntegerValueField(.mouseEventClickState, value: clickCount) }
+    event.post(tap: .cghidEventTap)
 }
 func handle(_ values: [Int]) {
     guard values.count == 5, values[0] >= 0, values[0] <= 31,
@@ -42,7 +48,17 @@ func handle(_ values: [Int]) {
     let next = values[0]
     let pos = mousePosition()
     for (mask, button, down, up) in buttonDefs where (buttons & mask) != (next & mask) {
-        postMouse((next & mask) != 0 ? down : up, button, pos)
+        let pressed = (next & mask) != 0
+        if pressed {
+            let now = ProcessInfo.processInfo.systemUptime
+            let previous = clickHistory[mask]
+            let nearby = previous.map { abs($0.position.x - pos.x) <= 5 && abs($0.position.y - pos.y) <= 5 } ?? false
+            let count = previous != nil && nearby && now - previous!.time <= NSEvent.doubleClickInterval ? previous!.count + 1 : 1
+            clickHistory[mask] = ClickHistory(time: now, position: pos, count: count)
+        }
+        let count = clickHistory[mask]?.count ?? 1
+        if debug { print("click", mask, pressed ? "down" : "up", count); fflush(stdout) }
+        postMouse(pressed ? down : up, button, pos, clickCount: count)
     }
     buttons = next
     let dx = values[1], dy = values[2]
@@ -99,6 +115,15 @@ while true {
             handle(numbers)
         } else if parts.count == 3 && parts[0] == "JT_SCROLL" {
             handleScroll(parts.dropFirst().compactMap { Int($0) })
+        } else if parts.count == 3 && parts[0] == "JT_TOUCH_SCROLL" {
+            let values = parts.dropFirst().compactMap { Int($0) }
+            if values.count == 2 && values.allSatisfy({ (-40...40).contains($0) }) {
+                if debug { print("touch scroll", values); fflush(stdout) }
+                if !suppressEvents && (values[0] != 0 || values[1] != 0) {
+                    CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+                            wheel1: Int32(values[1]), wheel2: Int32(values[0]), wheel3: 0)?.post(tap: .cghidEventTap)
+                }
+            }
         }
     }
     if pending.count > 4096 { pending = "" }
