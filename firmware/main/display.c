@@ -72,14 +72,14 @@ static const uint8_t font[][7] = {
     {30,17,17,30,16,16,16}, {14,17,17,17,21,18,13}, {30,17,17,30,20,18,17},
     {15,16,16,14,1,1,30}, {31,4,4,4,4,4,4}, {17,17,17,17,17,17,14},
     {17,17,17,17,17,10,4}, {17,17,17,21,21,21,10}, {17,17,10,4,10,17,17},
-    {17,17,10,4,4,4,4}, {31,1,2,4,8,16,31}
+    {17,17,10,4,4,4,4}, {31,1,2,4,8,16,31}, {0,0,0,31,0,0,0}
 };
 
 static void text_at(int x, int y, const char *s, int scale, uint16_t color)
 {
     for (; *s; ++s, x += 6 * scale) {
         int index = *s >= '0' && *s <= '9' ? *s - '0' :
-                    *s >= 'A' && *s <= 'Z' ? 10 + *s - 'A' : -1;
+                    *s >= 'A' && *s <= 'Z' ? 10 + *s - 'A' : *s == '-' ? 36 : -1;
         if (index < 0) continue;
         for (int row = 0; row < 7; ++row)
             for (int col = 0; col < 5; ++col)
@@ -166,7 +166,6 @@ esp_err_t lab_display_update(const lab_display_state_t *state)
     if (!fb || !state) return ESP_ERR_INVALID_STATE;
     const bool *buttons = state->buttons;
     const lab_touch_state_t *touch = &state->touch;
-    int x = state->x, y = state->y;
     bool adc_ok = state->adc_ok;
     const uint16_t bg = rgb(11, 19, 35), card = rgb(22, 35, 56);
     const uint16_t white = rgb(238, 245, 255), muted = rgb(137, 160, 186);
@@ -187,21 +186,23 @@ esp_err_t lab_display_update(const lab_display_state_t *state)
     text_at(46, 242, "JOYSTICK", 2, white);
     char value[16];
     text_at(46, 284, "X", 3, blue);
-    snprintf(value, sizeof(value), "%d", x);
-    text_at(80, 284, adc_ok ? value : "WAIT", 3, white);
+    snprintf(value, sizeof(value), "%d", state->normalized_x);
+    text_at(80, 284, adc_ok && state->joystick_calibrated ? value : "WAIT", 3, white);
     text_at(46, 338, "Y", 3, accent);
-    snprintf(value, sizeof(value), "%d", y);
-    text_at(80, 338, adc_ok ? value : "WAIT", 3, white);
-    /* Show the raw ADC position; not a calibrated direction. */
+    snprintf(value, sizeof(value), "%d", state->normalized_y);
+    text_at(80, 338, adc_ok && state->joystick_calibrated ? value : "WAIT", 3, white);
+    /* Equal pixel scales around the calibrated center; values include the deadzone. */
     rect(360, 253, 212, 142, bg);
-    rect(464, 259, 2, 130, muted);
-    rect(366, 323, 200, 2, muted);
-    if (adc_ok) {
-        int px = 366 + (x < 0 ? 0 : x > 4095 ? 4095 : x) * 190 / 4095;
-        int py = 259 + (4095 - (y < 0 ? 0 : y > 4095 ? 4095 : y)) * 120 / 4095;
-        rect(px, py, 10, 10, accent);
+    circle(465, 324, 60, muted);
+    rect(464, 265, 2, 118, muted);
+    rect(406, 323, 118, 2, muted);
+    if (adc_ok && state->joystick_calibrated) {
+        int px = 465 + state->normalized_x * 55 / 1000;
+        int py = 324 - state->normalized_y * 55 / 1000;
+        rect(px - 5, py - 5, 10, 10, accent);
     }
-    text_at(27, 445, "ESP32 P4 V3  RAW ADC", 2, muted);
+    text_at(380, 401, state->joystick_calibrated ? "NORMALIZED" : "CENTER WAIT", 1, muted);
+    text_at(27, 445, "XY NORMALIZED  DEADZONE 60", 2, muted);
     char touch_text[32];
     if (touch->ready) {
         snprintf(touch_text, sizeof(touch_text), "TOUCH %u MAX %u", touch->reported, touch->max_reported);

@@ -8,6 +8,9 @@ typedef struct {
     int x;
     int y;
     bool adc_ok;
+    bool joystick_calibrated;
+    int normalized_x;
+    int normalized_y;
     lab_touch_state_t touch;
 } lab_display_state_t;
 

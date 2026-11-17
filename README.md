@@ -12,6 +12,7 @@
 - [2026-11-17：输入诊断固件实机测试](experiments/2026-11-17-input-firmware.md)
 - [2026-11-17：屏幕显示与输入测试](experiments/2026-11-17-display-firmware.md)
 - [2026-11-17：触控上限测试](experiments/2026-11-17-touch-limit.md)
+- [2026-11-17：摇杆转圈与示意图校准](experiments/2026-11-17-joystick-visualization.md)
 
 ## 计划
 

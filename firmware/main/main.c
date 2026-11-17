@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "display.h"
+#include "joystick.h"
 #include "touch.h"
 
 #include "driver/gpio.h"
@@ -125,6 +126,7 @@ void app_main(void)
         display_queue = NULL;
     }
 
+    lab_joystick_cal_t joystick = {0};
     int min_x = INT32_MAX, max_x = INT32_MIN;
     int min_y = INT32_MAX, max_y = INT32_MIN;
     unsigned int errors = 0;
@@ -136,6 +138,10 @@ void app_main(void)
         esp_err_t x_result = adc_oneshot_read(adc, ADC1_GPIO21_CHANNEL, &x);
         esp_err_t y_result = adc_oneshot_read(adc, ADC1_GPIO20_CHANNEL, &y);
         if (x_result == ESP_OK && y_result == ESP_OK) {
+            bool was_ready = joystick.ready;
+            lab_joystick_update(&joystick, x, y);
+            if (!was_ready && joystick.ready)
+                printf("joystick center calibrated x=%d y=%d\n", joystick.center_x, joystick.center_y);
             if (x < min_x) min_x = x;
             if (x > max_x) max_x = x;
             if (y < min_y) min_y = y;
@@ -166,7 +172,14 @@ void app_main(void)
         if (display_queue) {
             lab_display_state_t state = { .touch = touch, .adc_ok = x_result == ESP_OK && y_result == ESP_OK };
             for (size_t i = 0; i < 4; ++i) state.buttons[i] = buttons[i].stable_pressed;
-            if (state.adc_ok) { state.x = x; state.y = y; }
+            if (state.adc_ok) {
+                state.x = x; state.y = y;
+                state.joystick_calibrated = joystick.ready;
+                if (joystick.ready) {
+                    state.normalized_x = lab_joystick_normalize(x, joystick.center_x, joystick.min_x, joystick.max_x);
+                    state.normalized_y = lab_joystick_normalize(y, joystick.center_y, joystick.min_y, joystick.max_y);
+                }
+            }
             xQueueOverwrite(display_queue, &state);
         }
         if (esp_timer_get_time() >= report_at) {
@@ -178,6 +191,12 @@ void app_main(void)
                        (long long)(esp_timer_get_time() / 1000), min_x, max_x,
                        min_y, max_y, errors, (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             }
+            if (joystick.ready && x_result == ESP_OK && y_result == ESP_OK)
+                printf("joystick center=%d,%d observed_x=%d,%d observed_y=%d,%d normalized=%d,%d\n",
+                       joystick.center_x, joystick.center_y, joystick.min_x, joystick.max_x,
+                       joystick.min_y, joystick.max_y,
+                       lab_joystick_normalize(x, joystick.center_x, joystick.min_x, joystick.max_x),
+                       lab_joystick_normalize(y, joystick.center_y, joystick.min_y, joystick.max_y));
             min_x = min_y = INT32_MAX;
             max_x = max_y = INT32_MIN;
             errors = 0;
