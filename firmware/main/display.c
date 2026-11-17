@@ -143,16 +143,31 @@ esp_err_t lab_display_init(void)
     ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_register_event_callbacks(panel, &callbacks, refresh_done),
                         TAG, "refresh callback");
     fb = framebuffers[draw_index];
-    bool initial[4] = {0};
-    ESP_RETURN_ON_ERROR(lab_display_update(initial, 0, 0, false), TAG, "first frame");
+    lab_display_state_t initial = {0};
+    ESP_RETURN_ON_ERROR(lab_display_update(&initial), TAG, "first frame");
     ESP_RETURN_ON_ERROR(gpio_set_level(GPIO_NUM_26, 1), TAG, "backlight on");
     ESP_LOGI(TAG, "display initialized 640x480 landscape");
     return ESP_OK;
 }
 
-esp_err_t lab_display_update(const bool buttons[4], int x, int y, bool adc_ok)
+static void circle(int cx, int cy, int radius, uint16_t color)
 {
-    if (!fb) return ESP_ERR_INVALID_STATE;
+    int outer = radius * radius;
+    int inner = (radius - 4) * (radius - 4);
+    for (int y = -radius; y <= radius; ++y)
+        for (int x = -radius; x <= radius; ++x) {
+            int distance = x * x + y * y;
+            if (distance <= outer && distance >= inner) pixel(cx + x, cy + y, color);
+        }
+}
+
+esp_err_t lab_display_update(const lab_display_state_t *state)
+{
+    if (!fb || !state) return ESP_ERR_INVALID_STATE;
+    const bool *buttons = state->buttons;
+    const lab_touch_state_t *touch = &state->touch;
+    int x = state->x, y = state->y;
+    bool adc_ok = state->adc_ok;
     const uint16_t bg = rgb(11, 19, 35), card = rgb(22, 35, 56);
     const uint16_t white = rgb(238, 245, 255), muted = rgb(137, 160, 186);
     const uint16_t accent = rgb(54, 222, 174), blue = rgb(77, 153, 255);
@@ -187,6 +202,21 @@ esp_err_t lab_display_update(const bool buttons[4], int x, int y, bool adc_ok)
         rect(px, py, 10, 10, accent);
     }
     text_at(27, 445, "ESP32 P4 V3  RAW ADC", 2, muted);
+    char touch_text[32];
+    if (touch->ready) {
+        snprintf(touch_text, sizeof(touch_text), "TOUCH %u MAX %u", touch->reported, touch->max_reported);
+    } else {
+        snprintf(touch_text, sizeof(touch_text), "TOUCH ERROR");
+    }
+    text_at(390, 26, touch_text, 2, white);
+    snprintf(touch_text, sizeof(touch_text), "VALID %u", touch->valid);
+    text_at(390, 52, touch_text, 2, muted);
+    if (touch->reported > LAB_TOUCH_POINTS) text_at(500, 52, "OVER TWO", 1, white);
+    const uint16_t touch_colors[2] = {rgb(54, 222, 174), rgb(255, 172, 76)};
+    for (unsigned i = 0; i < touch->valid; ++i) {
+        circle(touch->points[i].x, touch->points[i].y, 22, touch_colors[i]);
+        rect((int)touch->points[i].x - 2, (int)touch->points[i].y - 2, 5, 5, touch_colors[i]);
+    }
     /* Commit the completed back buffer; wait two refreshes before reusing the
      * previous front buffer because DMA changes buffers at a frame boundary. */
     while (xSemaphoreTake(refresh_done, 0) == pdTRUE) {}

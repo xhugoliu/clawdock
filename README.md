@@ -4,13 +4,14 @@
 
 ## 诊断固件
 
-- [ESP32-P4 v3 显示与输入诊断固件](firmware/README.md)：显示并读取按键和摇杆原始值；构建及实机验证状态见文档。
+- [ESP32-P4 v3 输入与触控诊断固件](firmware/README.md)：显示按键、摇杆与触点并记录原始数据；构建及实机验证状态见文档。
 
 ## 实验记录
 
 - [2026-11-17：硬件识别与首次基线](experiments/2026-11-17-hardware-baseline.md)
 - [2026-11-17：输入诊断固件实机测试](experiments/2026-11-17-input-firmware.md)
 - [2026-11-17：屏幕显示与输入测试](experiments/2026-11-17-display-firmware.md)
+- [2026-11-17：触控上限测试](experiments/2026-11-17-touch-limit.md)
 
 ## 计划
 

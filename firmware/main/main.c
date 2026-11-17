@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "display.h"
+#include "touch.h"
 
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
@@ -34,13 +35,6 @@ static button_t buttons[] = {
     { .name = "JOY", .pin = GPIO_NUM_4 },
 };
 
-typedef struct {
-    bool buttons[4];
-    int x;
-    int y;
-    bool adc_ok;
-} display_state_t;
-
 static QueueHandle_t display_queue;
 
 static void display_task(void *unused)
@@ -52,18 +46,18 @@ static void display_task(void *unused)
         vTaskDelete(NULL);
         return;
     }
-    display_state_t state = {0};
+    lab_display_state_t state = {0};
     TickType_t last = xTaskGetTickCount();
     while (true) {
         if (xQueuePeek(display_queue, &state, 0) == pdTRUE) {
-            status = lab_display_update(state.buttons, state.x, state.y, state.adc_ok);
+            status = lab_display_update(&state);
             if (status != ESP_OK) {
                 printf("display update failed: %s\n", esp_err_to_name(status));
                 vTaskDelete(NULL);
                 return;
             }
         }
-        vTaskDelayUntil(&last, pdMS_TO_TICKS(200));
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(100));
     }
 }
 
@@ -120,7 +114,12 @@ void app_main(void)
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc, ADC1_GPIO21_CHANNEL, &channel));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc, ADC1_GPIO20_CHANNEL, &channel));
 
-    display_queue = xQueueCreate(1, sizeof(display_state_t));
+    lab_touch_state_t touch = {0};
+    esp_err_t touch_init = lab_touch_init();
+    if (touch_init != ESP_OK) printf("touch init failed: %s\n", esp_err_to_name(touch_init));
+    uint8_t previous_count = 255, previous_valid = 255;
+    int64_t next_touch_log = 0;
+    display_queue = xQueueCreate(1, sizeof(lab_display_state_t));
     if (!display_queue || xTaskCreatePinnedToCore(display_task, "display", 4096, NULL, 1, NULL, 1) != pdPASS) {
         printf("display task unavailable; serial input test remains available\n");
         display_queue = NULL;
@@ -144,8 +143,28 @@ void app_main(void)
         } else {
             ++errors;
         }
+        if (touch_init == ESP_OK) {
+            esp_err_t touch_err = lab_touch_read(&touch);
+            if (touch_err != ESP_OK && touch.errors == 1)
+                printf("touch read failed: %s\n", esp_err_to_name(touch_err));
+            int64_t now = esp_timer_get_time();
+            if (touch_err == ESP_OK && (touch.reported != previous_count || touch.valid != previous_valid ||
+                (touch.reported && now >= next_touch_log))) {
+                printf("touch t_ms=%lld reported=%u valid=%u max=%u errors=%lu raw=",
+                       (long long)(now / 1000), touch.reported, touch.valid,
+                       touch.max_reported, (unsigned long)touch.errors);
+                for (unsigned i = 0; i < LAB_TOUCH_RAW_BYTES; ++i) printf("%02x", touch.raw[i]);
+                for (unsigned i = 0; i < touch.valid; ++i)
+                    printf(" point%u=%u,%u,id%u", i + 1, touch.points[i].x,
+                           touch.points[i].y, touch.points[i].id);
+                printf("\n");
+                previous_count = touch.reported;
+                previous_valid = touch.valid;
+                next_touch_log = now + 1000000;
+            }
+        }
         if (display_queue) {
-            display_state_t state = { .adc_ok = x_result == ESP_OK && y_result == ESP_OK };
+            lab_display_state_t state = { .touch = touch, .adc_ok = x_result == ESP_OK && y_result == ESP_OK };
             for (size_t i = 0; i < 4; ++i) state.buttons[i] = buttons[i].stable_pressed;
             if (state.adc_ok) { state.x = x; state.y = y; }
             xQueueOverwrite(display_queue, &state);
