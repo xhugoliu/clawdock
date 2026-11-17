@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "display.h"
+
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_chip_info.h"
@@ -10,6 +12,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "soc/adc_channel.h"
 
 #define SAMPLE_MS 20
@@ -30,6 +33,39 @@ static button_t buttons[] = {
     { .name = "SW3", .pin = GPIO_NUM_5 },
     { .name = "JOY", .pin = GPIO_NUM_4 },
 };
+
+typedef struct {
+    bool buttons[4];
+    int x;
+    int y;
+    bool adc_ok;
+} display_state_t;
+
+static QueueHandle_t display_queue;
+
+static void display_task(void *unused)
+{
+    (void)unused;
+    esp_err_t status = lab_display_init();
+    if (status != ESP_OK) {
+        printf("display init failed: %s; serial input test remains available\n", esp_err_to_name(status));
+        vTaskDelete(NULL);
+        return;
+    }
+    display_state_t state = {0};
+    TickType_t last = xTaskGetTickCount();
+    while (true) {
+        if (xQueuePeek(display_queue, &state, 0) == pdTRUE) {
+            status = lab_display_update(state.buttons, state.x, state.y, state.adc_ok);
+            if (status != ESP_OK) {
+                printf("display update failed: %s\n", esp_err_to_name(status));
+                vTaskDelete(NULL);
+                return;
+            }
+        }
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(200));
+    }
+}
 
 static void sample_buttons(void)
 {
@@ -84,9 +120,17 @@ void app_main(void)
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc, ADC1_GPIO21_CHANNEL, &channel));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc, ADC1_GPIO20_CHANNEL, &channel));
 
+    display_queue = xQueueCreate(1, sizeof(display_state_t));
+    if (!display_queue || xTaskCreatePinnedToCore(display_task, "display", 4096, NULL, 1, NULL, 1) != pdPASS) {
+        printf("display task unavailable; serial input test remains available\n");
+        display_queue = NULL;
+    }
+
     int min_x = INT32_MAX, max_x = INT32_MIN;
     int min_y = INT32_MAX, max_y = INT32_MIN;
-    unsigned int elapsed_ms = 0, errors = 0;
+    unsigned int errors = 0;
+    int64_t report_at = esp_timer_get_time() + REPORT_MS * 1000LL;
+    TickType_t last_sample = xTaskGetTickCount();
     while (true) {
         sample_buttons();
         int x, y;
@@ -100,8 +144,13 @@ void app_main(void)
         } else {
             ++errors;
         }
-        elapsed_ms += SAMPLE_MS;
-        if (elapsed_ms >= REPORT_MS) {
+        if (display_queue) {
+            display_state_t state = { .adc_ok = x_result == ESP_OK && y_result == ESP_OK };
+            for (size_t i = 0; i < 4; ++i) state.buttons[i] = buttons[i].stable_pressed;
+            if (state.adc_ok) { state.x = x; state.y = y; }
+            xQueueOverwrite(display_queue, &state);
+        }
+        if (esp_timer_get_time() >= report_at) {
             if (min_x == INT32_MAX) {
                 printf("adc t_ms=%lld no_valid_samples errors=%u\n",
                        (long long)(esp_timer_get_time() / 1000), errors);
@@ -112,8 +161,9 @@ void app_main(void)
             }
             min_x = min_y = INT32_MAX;
             max_x = max_y = INT32_MIN;
-            elapsed_ms = errors = 0;
+            errors = 0;
+            report_at = esp_timer_get_time() + REPORT_MS * 1000LL;
         }
-        vTaskDelay(pdMS_TO_TICKS(SAMPLE_MS));
+        vTaskDelayUntil(&last_sample, pdMS_TO_TICKS(SAMPLE_MS));
     }
 }
