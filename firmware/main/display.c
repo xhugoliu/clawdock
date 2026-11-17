@@ -172,8 +172,8 @@ esp_err_t lab_display_update(const lab_display_state_t *state)
     const uint16_t accent = rgb(54, 222, 174), blue = rgb(77, 153, 255);
     rect(0, 0, WIDTH, HEIGHT, bg);
     rect(0, 0, WIDTH, 6, accent);
-    text_at(26, 24, "HACHIMODOCK", 3, white);
-    text_at(27, 55, "INPUT LAB", 2, muted);
+    text_at(26, 24, "JINTAI", 3, white);
+    text_at(27, 55, "INPUT DIAGNOSTICS", 2, muted);
     text_at(27, 96, "BUTTONS", 2, muted);
     const char *labels[] = {"SW1", "SW2", "SW3", "JOY"};
     for (int i = 0; i < 4; ++i) {

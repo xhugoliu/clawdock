@@ -1,6 +1,6 @@
-# ESP32-P4 输入与触控诊断固件
+# 近台固件：ESP32-P4 输入与触控诊断
 
-这是独立实验固件，在屏幕上观察按键、摇杆和触控，在串口观察原始数据，不连接原项目客户端。测试范围：
+当前是近台的独立诊断固件，在屏幕上观察按键、摇杆和触控，在串口观察原始数据，不连接原项目客户端。测试范围：
 
 - SW1、SW2、SW3、摇杆中键：低电平表示按下，以约 20 ms 间隔采样，连续 3 次相同后输出状态变化。
 - 摇杆 X/Y：屏幕显示带死区的标准化数值（-1000 至 1000），串口每约 1 秒输出未经死区处理的 ADC 最小值、最大值和读取错误数。窗口极值不保证包含机械极限。
@@ -34,8 +34,8 @@ python3 -m venv .venv
 ## 摇杆计算测试
 
 ```sh
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/joystick_test.c firmware/main/joystick.c -o /tmp/hachimodock-joystick-test
-/tmp/hachimodock-joystick-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/joystick_test.c firmware/main/joystick.c -o /tmp/jintai-joystick-test
+/tmp/jintai-joystick-test
 ```
 
 具体测试条件和原始范围见[摇杆实验记录](../experiments/2026-11-17-joystick-visualization.md)。
@@ -47,8 +47,8 @@ cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/joystick_test.c
 触控解析的主机测试可在仓库根目录运行：
 
 ```sh
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touch_format_test.c firmware/main/touch_format.c -o /tmp/hachimodock-touch-format-test
-/tmp/hachimodock-touch-format-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touch_format_test.c firmware/main/touch_format.c -o /tmp/jintai-touch-format-test
+/tmp/jintai-touch-format-test
 ```
 
 ## 第三方代码

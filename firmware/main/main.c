@@ -86,7 +86,7 @@ void app_main(void)
 {
     esp_chip_info_t chip;
     esp_chip_info(&chip);
-    printf("\nHachimoDock input lab v0.1; chip revision=%d cores=%d\n",
+    printf("\nJintai input diagnostics v0.1; chip revision=%d cores=%d\n",
            chip.revision, chip.cores);
     printf("Buttons are active-low; ADC values are raw and uncalibrated.\n");
     printf("Sample period %d ms; button debounce %d samples; report %d ms.\n",
