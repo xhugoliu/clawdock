@@ -3,6 +3,7 @@ import ApplicationServices
 import Darwin
 
 let debug = ProcessInfo.processInfo.environment["JINTAI_MOUSE_DEBUG"] == "1"
+let suppressEvents = ProcessInfo.processInfo.environment["JINTAI_MOUSE_TEST_NO_POST"] == "1"
 let port = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/dev/cu.usbmodem5CF71530561"
 let prompt = ["AXTrustedCheckOptionPrompt" as CFString: true] as CFDictionary
 if !AXIsProcessTrustedWithOptions(prompt) {
@@ -56,6 +57,28 @@ func handle(_ values: [Int]) {
                 wheel1: Int32(values[3]), wheel2: Int32(values[4]), wheel3: 0)?.post(tap: .cghidEventTap)
     }
 }
+var scrollRemainderX = 0.0
+var scrollRemainderY = 0.0
+func scrollAxis(_ value: Int, _ remainder: inout Double) -> Int32 {
+    if value == 0 { remainder = 0; return 0 }
+    let normalized = Double(value) / 1000.0
+    let delta = normalized * abs(normalized) * 12.0
+    if remainder * delta < 0 { remainder = 0 }
+    remainder += delta
+    let whole = Int32(remainder)
+    remainder -= Double(whole)
+    return whole
+}
+func handleScroll(_ values: [Int]) {
+    guard values.count == 2, values.allSatisfy({ (-1000...1000).contains($0) }) else { return }
+    let horizontal = scrollAxis(-values[0], &scrollRemainderX)
+    let vertical = scrollAxis(values[1], &scrollRemainderY)
+    if debug { print("scroll", [horizontal, vertical]); fflush(stdout) }
+    if !suppressEvents && (vertical != 0 || horizontal != 0) {
+        CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+                wheel1: vertical, wheel2: horizontal, wheel3: 0)?.post(tap: .cghidEventTap)
+    }
+}
 print("Jintai 鼠标桥接已连接：\(port)")
 fflush(stdout)
 var pending = ""
@@ -74,6 +97,8 @@ while true {
         if parts.count == 6 && parts[0] == "JT_MOUSE" {
             let numbers = parts.dropFirst().compactMap { Int($0) }
             handle(numbers)
+        } else if parts.count == 3 && parts[0] == "JT_SCROLL" {
+            handleScroll(parts.dropFirst().compactMap { Int($0) })
         }
     }
     if pending.count > 4096 { pending = "" }

@@ -36,11 +36,25 @@ int main(void) {
     clear_events();
     int8_t dx, dy, wheel, pan;
     mouse_t mouse = {0};
-    mouse_motion(&mouse, 1000, 1000, &dx, &dy, &wheel, &pan);
-    assert(dx == 16 && dy == -16 && wheel == 0 && pan == 0);
+    mouse_motion(&mouse, 1000, 1000, 0, &dx, &dy, &wheel, &pan);
+    assert(dx == 22 && dy == -22 && wheel == 0 && pan == 0);
+    mouse_motion(&mouse, 1000, 0, 600, &dx, &dy, &wheel, &pan);
+    assert(dx == 31);
+    mouse_motion(&mouse, 1000, 0, 1200, &dx, &dy, &wheel, &pan);
+    assert(dx == 40);
+    mouse_motion(&mouse, 1000, 0, 120000, &dx, &dy, &wheel, &pan);
+    assert(dx == 40); /* Acceleration has a hard ceiling. */
+    mouse_motion(&mouse, 1000, 1000, 120010, &dx, &dy, &wheel, &pan);
+    assert(dx > 0 && dy < 0 && dx * dx + dy * dy <= 40 * 40); /* Diagonals too. */
+    mouse_motion(&mouse, 0, 0, 120020, &dx, &dy, &wheel, &pan);
+    mouse_motion(&mouse, 1000, 0, 120040, &dx, &dy, &wheel, &pan);
+    assert(dx == 22); /* Returning to center resets acceleration. */
     mouse_button(&mouse, 0, true);
     int sum = 0;
-    for (int i = 0; i < 50; ++i) { mouse_motion(&mouse, 0, 1000, &dx, &dy, &wheel, &pan); sum += wheel; }
+    for (int i = 0; i < 50; ++i) { mouse_motion(&mouse, 0, 1000, 120060 + i * 20, &dx, &dy, &wheel, &pan); sum += wheel; }
     assert(sum == 8 && dx == 0 && dy == 0 && pan == 0);
+    sum = 0;
+    for (int i = 0; i < 50; ++i) { mouse_motion(&mouse, 1000, 0, 121060 + i * 20, &dx, &dy, &wheel, &pan); sum += pan; }
+    assert(sum == -8 && wheel == 0);
     puts("mouse tests passed");
 }

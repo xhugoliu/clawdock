@@ -2,7 +2,9 @@
 set -eu
 host_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 app="$host_dir/JintaiMouse.app/Contents/MacOS/JintaiMouse"
-if [ ! -x "$app" ]; then "$host_dir/build-mouse-bridge.sh"; fi
+if [ ! -x "$app" ] || [ "$host_dir/mouse_bridge.swift" -nt "$app" ] || [ "$host_dir/Info.plist" -nt "$app" ]; then
+    "$host_dir/build-mouse-bridge.sh"
+fi
 port=${1:-}
 if [ -z "$port" ]; then
     for candidate in /dev/cu.usbmodem* /dev/cu.usbserial*; do

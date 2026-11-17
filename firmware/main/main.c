@@ -41,13 +41,13 @@ static button_t buttons[] = {
 
 static QueueHandle_t display_queue;
 
-/* USB-UART bridge uses the same reports as native HID; diagnostics use other lines. */
+/* Native USB uses wheel steps; the serial bridge receives smooth scroll axes separately. */
 static void output_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel, int8_t pan)
 {
     static uint8_t previous;
     usb_mouse_report(buttons, x, y, wheel, pan);
-    if (buttons != previous || x || y || wheel || pan) {
-        printf("JT_MOUSE %u %d %d %d %d\n", buttons, x, y, wheel, pan);
+    if (buttons != previous || x || y) {
+        printf("JT_MOUSE %u %d %d 0 0\n", buttons, x, y);
         previous = buttons;
     }
 }
@@ -275,9 +275,17 @@ void app_main(void)
                         mouse_pop(&apps.runtime.mouse);
                     }
                     int8_t dx = 0, dy = 0, wheel = 0, pan = 0;
-                    if (!apps.view.choosing && !apps.input_blocked && input.joystick_ready)
-                        mouse_motion(&apps.runtime.mouse, input.joystick_x, input.joystick_y, &dx, &dy, &wheel, &pan);
+                    bool motion_active = !apps.view.choosing && !apps.input_blocked && input.joystick_ready;
+                    mouse_motion(&apps.runtime.mouse, motion_active ? input.joystick_x : 0,
+                                 motion_active ? input.joystick_y : 0, now / 1000,
+                                 &dx, &dy, &wheel, &pan);
                     output_mouse_report(apps.runtime.mouse.buttons, dx, dy, wheel, pan);
+                    /* Send calibrated stick positions at the sampling rate for pixel scrolling. */
+                    static bool scroll_active;
+                    int sx = motion_active && apps.runtime.mouse.scroll_mode ? input.joystick_x : 0;
+                    int sy = motion_active && apps.runtime.mouse.scroll_mode ? input.joystick_y : 0;
+                    if (sx || sy || scroll_active) printf("JT_SCROLL %d %d\n", sx, sy);
+                    scroll_active = sx || sy;
                 }
                 if (previous_app.current != apps.view.current) {
                     /* Touch maximum is diagnostic application state, not a system lifetime statistic. */

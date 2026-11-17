@@ -17,6 +17,7 @@ void mouse_button(mouse_t *m, unsigned button, bool pressed)
     if (button == 0) {
         if (pressed) {
             m->scroll_mode = !m->scroll_mode;
+            m->pointer_accelerating = false;
             m->rem_x = m->rem_y = m->rem_wheel = m->rem_pan = 0;
         }
         return;
@@ -34,6 +35,7 @@ void mouse_chord(mouse_t *m, unsigned chord, bool pressed)
 void mouse_release(mouse_t *m)
 {
     set_buttons(m, 0);
+    m->pointer_accelerating = false;
     m->rem_x = m->rem_y = m->rem_wheel = m->rem_pan = 0;
 }
 
@@ -48,16 +50,37 @@ static int8_t axis(int value, int32_t *remainder, int scale)
     return (int8_t)result;
 }
 
-void mouse_motion(mouse_t *m, int x, int y, int8_t *dx, int8_t *dy, int8_t *wheel, int8_t *pan)
+void mouse_motion(mouse_t *m, int x, int y, int64_t now_ms, int8_t *dx, int8_t *dy, int8_t *wheel, int8_t *pan)
 {
     *dx = *dy = *wheel = *pan = 0;
     if (m->scroll_mode) {
         /* Scale 160/1000 gives up to eight wheel steps per second at 50 Hz. */
         *wheel = axis(y, &m->rem_wheel, 160);
-        *pan = axis(x, &m->rem_pan, 160);
+        *pan = axis(-x, &m->rem_pan, 160);
     } else {
-        *dx = axis(x, &m->rem_x, 16000);
-        *dy = axis(-y, &m->rem_y, 16000);
+        /* Start at 22 pixels per 20 ms at full deflection, ramp to 40 in 1.2 s. */
+        if (x > 100 || x < -100 || y > 100 || y < -100) {
+            if (!m->pointer_accelerating) {
+                m->pointer_accelerating = true;
+                m->pointer_started_ms = now_ms;
+            }
+        } else {
+            m->pointer_accelerating = false;
+        }
+        int64_t elapsed = m->pointer_accelerating ? now_ms - m->pointer_started_ms : 0;
+        if (elapsed < 0) elapsed = 0;
+        if (elapsed > 1200) elapsed = 1200;
+        int scale = 22000 + (int)(18000 * elapsed / 1200);
+        *dx = axis(x, &m->rem_x, scale);
+        *dy = axis(-y, &m->rem_y, scale);
+        /* Limit the combined diagonal speed, not just each axis. */
+        int squared = *dx * *dx + *dy * *dy;
+        if (squared > 40 * 40) {
+            int magnitude = 40;
+            while (magnitude * magnitude < squared) ++magnitude;
+            *dx = (int8_t)(*dx * 40 / magnitude);
+            *dy = (int8_t)(*dy * 40 / magnitude);
+        }
     }
 }
 
