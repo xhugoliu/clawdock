@@ -29,6 +29,16 @@ cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/screen_idle_tes
 /tmp/jintai-screen-idle-test
 ```
 
+## 设备界面样式
+
+画布为纯黑，面板和文字使用灰阶，橙色用于小面积的交互反馈。左侧保留 32 px 页面边距，抵消设备两侧黑边的宽度差。标题、底栏和面板可以贴近上、下、右侧边缘。应用选择器和 Codex 列表共用焦点行，页标题和底部操作提示也使用共用绘制函数。[颜色、间距和字体角色](main/app_ui_theme.h)
+
+固件的英文标签使用 Noto Sans 的 22、27、36 px 抗锯齿字形。字体数据预生成并随固件嵌入。修改字体后可用 Pillow 11.3.0 运行下方命令生成字形。[SIL OFL 1.1](main/app_ui_font.OFL.txt) · [Noto Sans 源字体](https://github.com/google/fonts/blob/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf)
+
+```sh
+python3 firmware/scripts/build_ui_font.py /path/to/NotoSans.ttf firmware/main/app_ui_font.bin
+```
+
 ## Codex 会话监看
 
 通过 CH343 USB-UART 连接并运行 [Mac 菜单栏应用](../host/README.md)，在设备选择 `CODEX`。每屏最多 3 条，摇杆上下浏览列表中的最多 6 个会话。运行中的会话优先占用列表名额，随后是近 60 秒内结束的会话。屏幕会区分等待 Mac、连接超时、日志目录不可用和暂无活跃会话。

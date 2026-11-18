@@ -1,68 +1,132 @@
 #include "app_ui.h"
+#include "app_ui_theme.h"
 #include <stdio.h>
-#include <stddef.h>
 #include <string.h>
 
 #define WIDTH 640
 #define HEIGHT 480
-#define PANEL_WIDTH 480
-static uint16_t *fb; /* Used only by the display task. */
+#define CONTENT_WIDTH (WIDTH - UI_LEFT_MARGIN)
+#define CONTENT_X (UI_LEFT_MARGIN + UI_INSET)
+#define FOOTER_BASELINE (HEIGHT - UI_FOOTER_DESCENT)
+#define CONTENT_BOTTOM (FOOTER_BASELINE - 30)
 
-static uint16_t rgb(unsigned r, unsigned g, unsigned b)
-{
-    return (uint16_t)(((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3));
-}
+static uint16_t *fb; /* Used only by the display task. */
+static const char apps_hint[] = "Apps: hold all 3 keys";
+static const char move_hint[] = "Stick: up / down";
+
+extern const uint8_t ui_font_data[] __asm__("_binary_app_ui_font_bin_start");
 
 /* One landscape pixel maps to the panel's clockwise quarter-turn. */
 static void pixel(int x, int y, uint16_t color)
 {
     if ((unsigned)x < WIDTH && (unsigned)y < HEIGHT)
-        fb[(size_t)x * PANEL_WIDTH + (PANEL_WIDTH - 1 - y)] = color;
+        fb[(size_t)x * HEIGHT + (HEIGHT - 1 - y)] = color;
 }
 
 static void rect(int x, int y, int w, int h, uint16_t color)
 {
-    for (int yy = y; yy < y + h; ++yy)
-        for (int xx = x; xx < x + w; ++xx)
-            pixel(xx, yy, color);
+    int left = x < 0 ? 0 : x, top = y < 0 ? 0 : y;
+    int right = x + w > WIDTH ? WIDTH : x + w;
+    int bottom = y + h > HEIGHT ? HEIGHT : y + h;
+    if (left >= right || top >= bottom) return;
+    for (int col = left; col < right; ++col) {
+        uint16_t *start = fb + (size_t)col * HEIGHT + HEIGHT - bottom;
+        uint16_t *end = start + bottom - top;
+        while (start < end) *start++ = color;
+    }
 }
 
-/* 5x7 glyphs used by the diagnostic screen and sleep warning. */
-static const uint8_t font[][7] = {
-    {14,17,19,21,25,17,14}, {4,12,4,4,4,4,14}, {14,17,1,2,4,8,31},
-    {30,1,1,14,1,1,30}, {2,6,10,18,31,2,2}, {31,16,16,30,1,1,30},
-    {14,16,16,30,17,17,14}, {31,1,2,4,8,8,8}, {14,17,17,14,17,17,14},
-    {14,17,17,15,1,1,14},
-    {14,17,17,31,17,17,17}, {30,17,17,30,17,17,30}, {14,17,16,16,16,17,14},
-    {30,17,17,17,17,17,30}, {31,16,16,30,16,16,31}, {31,16,16,30,16,16,16},
-    {14,17,16,23,17,17,15}, {17,17,17,31,17,17,17}, {14,4,4,4,4,4,14},
-    {7,2,2,2,18,18,12}, {17,18,20,24,20,18,17}, {16,16,16,16,16,16,31},
-    {17,27,21,21,17,17,17}, {17,25,21,19,17,17,17}, {14,17,17,17,17,17,14},
-    {30,17,17,30,16,16,16}, {14,17,17,17,21,18,13}, {30,17,17,30,20,18,17},
-    {15,16,16,14,1,1,30}, {31,4,4,4,4,4,4}, {17,17,17,17,17,17,14},
-    {17,17,17,17,17,10,4}, {17,17,17,21,21,21,10}, {17,17,10,4,10,17,17},
-    {17,17,10,4,4,4,4}, {31,1,2,4,8,16,31}, {0,0,0,31,0,0,0},
-    {0,0,31,2,4,8,31}, {0,0,0,0,0,6,6}
-};
-
-static void text_at(int x, int y, const char *s, int scale, uint16_t color)
+static void begin_frame(uint16_t *buffer)
 {
-    for (; *s; ++s, x += 6 * scale) {
-        int index = *s >= '0' && *s <= '9' ? *s - '0' :
-                    *s >= 'A' && *s <= 'Z' ? 10 + *s - 'A' :
-                    *s == '-' ? 36 : *s == 'z' ? 37 : *s == '.' ? 38 : -1;
-        if (index < 0) continue;
-        for (int row = 0; row < 7; ++row)
-            for (int col = 0; col < 5; ++col)
-                if (font[index][row] & (1 << (4 - col)))
-                    rect(x + col * scale, y + row * scale, scale, scale, color);
+    fb = buffer;
+    rect(0, 0, WIDTH, HEIGHT, UI_CANVAS);
+}
+
+static uint16_t blend(uint16_t under, uint16_t ink, unsigned alpha)
+{
+    unsigned back = 15 - alpha;
+    unsigned r = ((under >> 11) * back + (ink >> 11) * alpha + 7) / 15;
+    unsigned g = (((under >> 5) & 63) * back + ((ink >> 5) & 63) * alpha + 7) / 15;
+    unsigned b = ((under & 31) * back + (ink & 31) * alpha + 7) / 15;
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+static const uint8_t *font_face(ui_font_t font)
+{
+    const uint8_t *entry = ui_font_data + (unsigned)font * 4;
+    uint32_t offset = (uint32_t)entry[0] | (uint32_t)entry[1] << 8 |
+                      (uint32_t)entry[2] << 16 | (uint32_t)entry[3] << 24;
+    return ui_font_data + offset;
+}
+
+static const uint8_t *font_glyph(const uint8_t *face, unsigned char character)
+{
+    if (character < ' ' || character > '~') character = '?';
+    /* Advance, two bearings, width, height and a little-endian mask offset. */
+    return face + (character - ' ') * 7;
+}
+
+static int text_width(const char *text, ui_font_t font)
+{
+    const uint8_t *face = font_face(font);
+    int width = 0;
+    for (; *text; ++text) width += font_glyph(face, *text)[0];
+    return width;
+}
+
+static void text_at(int x, int baseline, const char *text, ui_font_t font, uint16_t ink)
+{
+    const uint8_t *face = font_face(font);
+    for (; *text; ++text) {
+        const uint8_t *glyph = font_glyph(face, *text);
+        int left = x + (int8_t)glyph[1], top = baseline + (int8_t)glyph[2];
+        unsigned width = glyph[3], height = glyph[4];
+        const uint8_t *mask = face + (glyph[5] | (unsigned)glyph[6] << 8);
+        for (unsigned row = 0; row < height; ++row) {
+            int py = top + (int)row;
+            if ((unsigned)py >= HEIGHT) continue;
+            for (unsigned col = 0; col < width; ++col) {
+                unsigned index = row * width + col;
+                unsigned alpha = index & 1 ? mask[index / 2] & 15 : mask[index / 2] >> 4;
+                int px = left + (int)col;
+                if (alpha && (unsigned)px < WIDTH) {
+                    uint16_t *target = fb + (size_t)px * HEIGHT + HEIGHT - 1 - py;
+                    *target = alpha == 15 ? ink : blend(*target, ink, alpha);
+                }
+            }
+        }
+        x += glyph[0];
     }
+}
+
+static void text_end(int right, int baseline, const char *text, ui_font_t font, uint16_t ink)
+{
+    text_at(right - text_width(text, font), baseline, text, font, ink);
+}
+
+static void page_title(const char *title)
+{
+    text_at(UI_LEFT_MARGIN, UI_TITLE_BASELINE, title, UI_FONT_TITLE, UI_TEXT);
+}
+
+static void footer(const char *left, const char *center, const char *right)
+{
+    if (left) text_at(UI_LEFT_MARGIN, FOOTER_BASELINE, left, UI_FONT_HINT, UI_SECONDARY);
+    if (center) text_at(UI_LEFT_MARGIN + (CONTENT_WIDTH - text_width(center, UI_FONT_HINT)) / 2, FOOTER_BASELINE,
+                        center, UI_FONT_HINT, UI_SECONDARY);
+    if (right) text_end(WIDTH, FOOTER_BASELINE, right, UI_FONT_HINT, UI_SECONDARY);
+}
+
+static void list_row(int y, int height, bool focused)
+{
+    enum { MARK_WIDTH = 3, MARK_HEIGHT = 24 };
+    rect(UI_LEFT_MARGIN, y, CONTENT_WIDTH, height, focused ? UI_ENGAGED : UI_SURFACE);
+    if (focused) rect(UI_LEFT_MARGIN, y + (height - MARK_HEIGHT) / 2, MARK_WIDTH, MARK_HEIGHT, UI_ACCENT);
 }
 
 static void circle(int cx, int cy, int radius, uint16_t color)
 {
-    int outer = radius * radius;
-    int inner = (radius - 4) * (radius - 4);
+    int outer = radius * radius, inner = (radius - 2) * (radius - 2);
     for (int y = -radius; y <= radius; ++y)
         for (int x = -radius; x <= radius; ++x) {
             int distance = x * x + y * y;
@@ -72,67 +136,104 @@ static void circle(int cx, int cy, int radius, uint16_t color)
 
 static void draw_diagnostics(const lab_display_state_t *state)
 {
-    const bool *buttons = state->buttons;
+    enum { KEY_Y = UI_CONTENT_TOP + 20, KEY_HEIGHT = 72,
+           KEY_WIDTH = (CONTENT_WIDTH - 3 * UI_SPACE) / 4,
+           PLOT_TOP = KEY_Y + KEY_HEIGHT + 3 * UI_SPACE,
+           PLOT_X = WIDTH - CONTENT_WIDTH / 4, PLOT_Y = (PLOT_TOP + CONTENT_BOTTOM) / 2,
+           PLOT_RADIUS = 64 };
     const lab_touch_state_t *touch = &state->touch;
-    bool adc_ok = state->adc_ok;
-    const uint16_t bg = rgb(11, 19, 35), card = rgb(22, 35, 56);
-    const uint16_t white = rgb(238, 245, 255), muted = rgb(137, 160, 186);
-    const uint16_t accent = rgb(54, 222, 174), blue = rgb(77, 153, 255);
-    rect(0, 0, WIDTH, HEIGHT, bg);
-    rect(0, 0, WIDTH, 6, accent);
-    text_at(26, 24, "JINTAI", 3, white);
-    text_at(27, 55, "INPUT DIAGNOSTICS", 2, muted);
-    text_at(27, 96, "BUTTONS", 2, muted);
-    const char *labels[] = {"SW1", "SW2", "SW3", "JOY"};
-    for (int i = 0; i < 4; ++i) {
-        int bx = 26 + i * 150;
-        rect(bx, 120, 134, 78, buttons[i] ? accent : card);
-        text_at(bx + 12, 132, labels[i], 3, buttons[i] ? bg : white);
-        text_at(bx + 12, 170, buttons[i] ? "PRESSED" : "READY", 2, buttons[i] ? bg : muted);
+    bool joystick_ready = state->adc_ok && state->joystick_calibrated;
+
+    page_title(app_title(state->app.current));
+    char label[40];
+    if (touch->ready)
+        snprintf(label, sizeof(label), "Touch %u / Max %u", touch->reported, touch->max_reported);
+    else
+        snprintf(label, sizeof(label), "Touch error");
+    text_end(WIDTH, UI_TITLE_BASELINE, label, UI_FONT_HINT, UI_TEXT);
+    snprintf(label, sizeof(label), "Valid %u%s", touch->valid,
+             touch->reported > LAB_TOUCH_POINTS ? " / Over two" : "");
+    text_end(WIDTH, 50, label, UI_FONT_HINT, UI_SECONDARY);
+
+    text_at(UI_LEFT_MARGIN, KEY_Y - 12, "Buttons", UI_FONT_HINT, UI_SECONDARY);
+    const char *keys[] = {"SW1", "SW2", "SW3", "Stick"};
+    for (unsigned i = 0; i < 4; ++i) {
+        int x = UI_LEFT_MARGIN + (int)i * (KEY_WIDTH + UI_SPACE);
+        bool pressed = state->buttons[i];
+        rect(x, KEY_Y, KEY_WIDTH, KEY_HEIGHT, pressed ? UI_ENGAGED : UI_SURFACE);
+        text_at(x + UI_INSET, KEY_Y + 32, keys[i], UI_FONT_BODY, UI_TEXT);
+        text_at(x + UI_INSET, KEY_Y + 59, pressed ? "Pressed" : "Ready", UI_FONT_HINT,
+                pressed ? UI_TEXT : UI_SECONDARY);
     }
-    rect(26, 222, 588, 200, card);
-    text_at(46, 242, "JOYSTICK", 2, white);
-    char value[16];
-    text_at(46, 284, "X", 3, blue);
-    snprintf(value, sizeof(value), "%d", state->normalized_x);
-    text_at(80, 284, adc_ok && state->joystick_calibrated ? value : "WAIT", 3, white);
-    text_at(46, 338, "Y", 3, accent);
-    snprintf(value, sizeof(value), "%d", state->normalized_y);
-    text_at(80, 338, adc_ok && state->joystick_calibrated ? value : "WAIT", 3, white);
-    /* Equal pixel scales around the calibrated center; values include the deadzone. */
-    rect(360, 253, 212, 142, bg);
-    circle(465, 324, 60, muted);
-    rect(464, 265, 2, 118, muted);
-    rect(406, 323, 118, 2, muted);
-    if (adc_ok && state->joystick_calibrated) {
-        int px = 465 + state->normalized_x * 55 / 1000;
-        int py = 324 - state->normalized_y * 55 / 1000;
-        rect(px - 5, py - 5, 10, 10, accent);
+
+    rect(UI_LEFT_MARGIN, PLOT_TOP, CONTENT_WIDTH, CONTENT_BOTTOM - PLOT_TOP, UI_SURFACE);
+    text_at(CONTENT_X, PLOT_TOP + 36, "Joystick", UI_FONT_BODY, UI_TEXT);
+    text_at(CONTENT_X, 297, "X", UI_FONT_HINT, UI_SECONDARY);
+    text_at(CONTENT_X, 352, "Y", UI_FONT_HINT, UI_SECONDARY);
+    snprintf(label, sizeof(label), "%d", state->normalized_x);
+    text_at(CONTENT_X + 40, 297, joystick_ready ? label : "Wait", UI_FONT_TITLE, UI_TEXT);
+    snprintf(label, sizeof(label), "%d", state->normalized_y);
+    text_at(CONTENT_X + 40, 352, joystick_ready ? label : "Wait", UI_FONT_TITLE, UI_TEXT);
+
+    circle(PLOT_X, PLOT_Y, PLOT_RADIUS, UI_GUIDE);
+    rect(PLOT_X, PLOT_Y - PLOT_RADIUS + 1, 1, 2 * PLOT_RADIUS - 1, UI_GUIDE);
+    rect(PLOT_X - PLOT_RADIUS + 1, PLOT_Y, 2 * PLOT_RADIUS - 1, 1, UI_GUIDE);
+    if (joystick_ready) {
+        int x = PLOT_X + state->normalized_x * 59 / 1000;
+        int y = PLOT_Y - state->normalized_y * 59 / 1000;
+        rect(x - 4, y - 4, UI_SPACE, UI_SPACE, UI_ACCENT);
     }
-    text_at(380, 401, state->joystick_calibrated ? "NORMALIZED" : "CENTER WAIT", 1, muted);
-    text_at(27, 445, "XY NORMALIZED  DEADZONE 60", 2, muted);
-    char touch_text[32];
-    if (touch->ready) {
-        snprintf(touch_text, sizeof(touch_text), "TOUCH %u MAX %u", touch->reported, touch->max_reported);
-    } else {
-        snprintf(touch_text, sizeof(touch_text), "TOUCH ERROR");
-    }
-    text_at(390, 26, touch_text, 2, white);
-    snprintf(touch_text, sizeof(touch_text), "VALID %u", touch->valid);
-    text_at(390, 52, touch_text, 2, muted);
-    if (touch->reported > LAB_TOUCH_POINTS) text_at(500, 52, "OVER TWO", 1, white);
-    const uint16_t touch_colors[2] = {rgb(54, 222, 174), rgb(255, 172, 76)};
+    footer(joystick_ready ? "Normalized / Deadzone 60" : "Waiting for stick", NULL, apps_hint);
+
     for (unsigned i = 0; i < touch->valid; ++i) {
-        circle(touch->points[i].x, touch->points[i].y, 22, touch_colors[i]);
-        rect((int)touch->points[i].x - 2, (int)touch->points[i].y - 2, 5, 5, touch_colors[i]);
+        int x = touch->points[i].x, y = touch->points[i].y;
+        uint16_t color = i == 0 ? UI_TEXT : UI_SECONDARY;
+        circle(x, y, 22, color);
+        rect(x - 2, y - 2, 5, 5, color);
     }
 }
 
-void app_ui_sleep_warning(uint16_t *buffer)
+static void draw_selector(const app_view_t *app)
 {
-    fb = buffer;
-    rect(0, 0, WIDTH, HEIGHT, rgb(0, 0, 0));
-    text_at((WIDTH - 35 * 10) / 2, (HEIGHT - 7 * 10) / 2, "Zzz...", 10, rgb(255, 255, 255));
+    enum { ROW_HEIGHT = (CONTENT_BOTTOM - UI_CONTENT_TOP - (JINTAI_APP_COUNT - 1) * UI_SPACE) / JINTAI_APP_COUNT };
+    page_title("Apps");
+    for (unsigned i = 0; i < JINTAI_APP_COUNT; ++i) {
+        int y = UI_CONTENT_TOP + (int)i * (ROW_HEIGHT + UI_SPACE);
+        int baseline = y + ROW_HEIGHT / 2 + 9;
+        list_row(y, ROW_HEIGHT, i == app->selected);
+        text_at(CONTENT_X, baseline, app_title(i), UI_FONT_BODY, UI_TEXT);
+        if (i == app->current)
+            text_end(WIDTH - UI_INSET, baseline, "Current app", UI_FONT_HINT, UI_SECONDARY);
+    }
+    footer("Release all three keys to switch", NULL, move_hint);
+}
+
+static void draw_mouse(const app_view_t *app)
+{
+    static const char *const buttons[][2] = {
+        {"SW2", "Right click"}, {"SW3", "Left click"},
+        {"SW1 + SW2", "Back"}, {"SW2 + SW3", "Forward"},
+    };
+    static const char *const gestures[][2] = {
+        {"Drag", "Move"}, {"Tap", "Left click"},
+        {"Two-finger drag", "Scroll"}, {"Two-finger tap", "Right click"},
+    };
+    page_title(app_title(app->current));
+    rect(UI_LEFT_MARGIN, UI_CONTENT_TOP, CONTENT_WIDTH, 112, UI_SURFACE);
+    text_at(CONTENT_X, UI_CONTENT_TOP + 38, "Current mode", UI_FONT_HINT, UI_SECONDARY);
+    text_at(CONTENT_X, UI_CONTENT_TOP + 85, app->mouse_scroll ? "Scroll" : "Cursor", UI_FONT_TITLE, UI_TEXT);
+    text_end(WIDTH - UI_INSET, UI_CONTENT_TOP + 85, "SW1: change mode", UI_FONT_HINT, UI_SECONDARY);
+
+    text_at(UI_LEFT_MARGIN, 213, "Buttons", UI_FONT_BODY, UI_TEXT);
+    text_at(328, 213, "Touchpad", UI_FONT_BODY, UI_TEXT);
+    for (unsigned i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
+        int y = 251 + (int)i * 40;
+        text_at(UI_LEFT_MARGIN, y, buttons[i][0], UI_FONT_HINT, UI_SECONDARY);
+        text_at(166, y, buttons[i][1], UI_FONT_HINT, UI_TEXT);
+        text_at(328, y, gestures[i][0], UI_FONT_HINT, UI_SECONDARY);
+        text_end(WIDTH, y, gestures[i][1], UI_FONT_HINT, UI_TEXT);
+    }
+    footer(apps_hint, NULL, NULL);
 }
 
 static void codex_bitmap(int x, int y, const uint8_t *bitmap, unsigned height, uint16_t color)
@@ -143,57 +244,54 @@ static void codex_bitmap(int x, int y, const uint8_t *bitmap, unsigned height, u
                 pixel(x + (int)col, y + (int)row, color);
 }
 
-static void codex_status(int right, int y, uint8_t status)
+static void codex_status(int right, int baseline, uint8_t status)
 {
-    const int scale = 2;
-    const char *label = "CANCELLED";
-    uint16_t color = rgb(137, 160, 186);
-    if (status == CODEX_RUNNING) { label = "RUNNING"; color = rgb(54, 222, 174); }
-    if (status == CODEX_COMPLETED) { label = "DONE"; color = rgb(119, 181, 255); }
-    if (status == CODEX_FAILED) { label = "FAILED"; color = rgb(255, 147, 112); }
-    text_at(right - ((int)strlen(label) * 6 - 1) * scale, y, label, scale, color);
+    const char *label;
+    switch (status) {
+        case CODEX_RUNNING: label = "Running"; break;
+        case CODEX_COMPLETED: label = "Done"; break;
+        case CODEX_FAILED: label = "Failed"; break;
+        default: label = "Cancelled"; break;
+    }
+    text_end(right, baseline, label, UI_FONT_HINT,
+             status == CODEX_RUNNING || status == CODEX_FAILED ? UI_TEXT : UI_SECONDARY);
 }
 
 static const char *codex_link_status(const lab_display_state_t *state)
 {
-    if (!state->codex_last_contact_ms) return "WAITING FOR MAC";
-    if (state->codex_now_ms - state->codex_last_contact_ms > CODEX_TIMEOUT_MS) return "MAC LINK OFFLINE";
+    if (!state->codex_last_contact_ms) return "Waiting for Mac";
+    if (state->codex_now_ms - state->codex_last_contact_ms > CODEX_TIMEOUT_MS) return "Mac is offline";
     return NULL;
 }
 
 static void draw_codex_detail(const lab_display_state_t *state)
 {
-    const uint16_t bg = rgb(11, 19, 35), card = rgb(22, 35, 56);
-    const uint16_t white = rgb(238, 245, 255), muted = rgb(137, 160, 186);
     const codex_detail_t *detail = state->codex_detail;
-    rect(0, 0, WIDTH, HEIGHT, bg);
-    rect(0, 0, WIDTH, 6, rgb(54, 222, 174));
-    rect(26, 75, 588, 340, card);
-    text_at(26, 440, "SW3 BACK", 2, muted);
-
     const char *notice = codex_link_status(state);
     if (!notice) {
         if (!detail || !detail->received_ms || state->codex_now_ms - detail->received_ms > CODEX_TIMEOUT_MS ||
-            memcmp(detail->id, state->app.codex_id, CODEX_ID_BYTES) != 0) notice = "LOADING SESSION";
-        else if (!detail->pages) notice = "SESSION UNAVAILABLE";
+            memcmp(detail->id, state->app.codex_id, CODEX_ID_BYTES) != 0) notice = "Loading session";
+        else if (!detail->pages) notice = "Session unavailable";
     }
     if (notice) {
-        text_at(26, 28, "CODEX", 5, white);
-        text_at(45, 112, notice, 3, white);
+        page_title(app_title(state->app.current));
+        text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53, notice, UI_FONT_BODY, UI_TEXT);
+        footer("SW3: back", NULL, NULL);
         return;
     }
 
-    codex_bitmap(26, 23, detail->session.title, CODEX_TITLE_HEIGHT, white);
-    codex_status(614, 32, detail->session.state);
-    if (detail->pages > 1) {
-        char label[24];
-        snprintf(label, sizeof(label), "PAGE %u OF %u", state->app.codex_page + 1, detail->pages);
-        text_at((WIDTH - (int)strlen(label) * 12) / 2, 440, label, 2, muted);
-        text_at(414, 440, "JOYSTICK UP DOWN", 2, muted);
-    }
-    if (detail->page != state->app.codex_page) text_at(45, 112, "LOADING PAGE", 3, white);
-    else if (!detail->has_reply) text_at(45, 112, "NO REPLY YET", 3, white);
-    else codex_bitmap(45, 85, detail->reply, CODEX_DETAIL_HEIGHT, white);
+    codex_bitmap(UI_LEFT_MARGIN, 5, detail->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
+    codex_status(WIDTH, UI_TITLE_BASELINE, detail->session.state);
+
+    char page[24];
+    snprintf(page, sizeof(page), "Page %u / %u", state->app.codex_page + 1, detail->pages);
+    footer("SW3: back", detail->pages > 1 ? page : NULL, detail->pages > 1 ? move_hint : NULL);
+
+    rect(UI_LEFT_MARGIN, UI_CONTENT_TOP, CONTENT_WIDTH, CODEX_DETAIL_HEIGHT + 2 * UI_SPACE, UI_SURFACE);
+    if (detail->page != state->app.codex_page)
+        text_at(CONTENT_X, UI_CONTENT_TOP + 53, "Loading page", UI_FONT_BODY, UI_TEXT);
+    else if (!detail->has_reply) text_at(CONTENT_X, UI_CONTENT_TOP + 53, "No reply yet", UI_FONT_BODY, UI_TEXT);
+    else codex_bitmap(CONTENT_X, UI_CONTENT_TOP + UI_SPACE, detail->reply, CODEX_DETAIL_HEIGHT, UI_TEXT);
 }
 
 static void draw_codex(const lab_display_state_t *state)
@@ -202,23 +300,21 @@ static void draw_codex(const lab_display_state_t *state)
         draw_codex_detail(state);
         return;
     }
-    const uint16_t bg = rgb(11, 19, 35), card = rgb(22, 35, 56), selected_card = rgb(32, 52, 74);
-    const uint16_t white = rgb(238, 245, 255), muted = rgb(137, 160, 186), accent = rgb(54, 222, 174);
+    enum { FIRST_ROW = UI_CONTENT_TOP + UI_SPACE, VISIBLE_ROWS = 3,
+           ROW_HEIGHT = (CONTENT_BOTTOM - FIRST_ROW - (VISIBLE_ROWS - 1) * UI_SPACE) / VISIBLE_ROWS };
     const codex_snapshot_t *snapshot = state->codex;
-    rect(0, 0, WIDTH, HEIGHT, bg);
-    rect(0, 0, WIDTH, 6, accent);
-    text_at(26, 25, "CODEX", 5, white);
+
+    page_title(app_title(state->app.current));
     const char *empty = codex_link_status(state);
     if (!empty) {
         if (!snapshot || !snapshot->received_ms || state->codex_now_ms - snapshot->received_ms > CODEX_TIMEOUT_MS)
-            empty = "LOADING SESSIONS";
-        else if (!snapshot->available) empty = "CODEX LOGS UNAVAILABLE";
-        else if (!snapshot->count) empty = "NO ACTIVE SESSIONS";
+            empty = "Loading sessions";
+        else if (!snapshot->available) empty = "Codex logs unavailable";
+        else if (!snapshot->count) empty = "No active sessions";
     }
     if (empty) {
-        rect(26, 100, 588, 144, card);
-        text_at(46, 145, empty, 3, white);
-        text_at(26, 440, "HOLD SW KEYS FOR APPS", 2, muted);
+        text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53, empty, UI_FONT_BODY, UI_TEXT);
+        footer(apps_hint, NULL, NULL);
         return;
     }
 
@@ -229,71 +325,55 @@ static void draw_codex(const lab_display_state_t *state)
         if (memcmp(state->app.codex_id, snapshot->rows[i].id, CODEX_ID_BYTES) == 0) focus = i;
     }
     char label[24];
-    snprintf(label, sizeof(label), "%u ACTIVE", active);
-    text_at(455, 28, label, 3, accent);
-    snprintf(label, sizeof(label), "%u OF %u", focus + 1, snapshot->count);
-    text_at(480, 64, label, 2, muted);
+    snprintf(label, sizeof(label), "%u running", active);
+    text_end(WIDTH, UI_TITLE_BASELINE, label, UI_FONT_BODY, UI_TEXT);
+    snprintf(label, sizeof(label), "%u / %u", focus + 1, snapshot->count);
+    text_end(WIDTH, 52, label, UI_FONT_HINT, UI_SECONDARY);
 
-    unsigned first = focus >= 3 ? focus - 2 : 0;
-    for (unsigned i = first; i < snapshot->count && i < first + 3; ++i) {
-        int y = 91 + (int)(i - first) * 109;
+    unsigned first = focus >= VISIBLE_ROWS ? focus - (VISIBLE_ROWS - 1) : 0;
+    for (unsigned i = first; i < snapshot->count && i < first + VISIBLE_ROWS; ++i) {
+        int y = FIRST_ROW + (int)(i - first) * (ROW_HEIGHT + UI_SPACE);
         const codex_row_t *row = &snapshot->rows[i];
-        rect(26, y, 588, 102, focus == i ? selected_card : card);
-        if (focus == i) rect(26, y, 5, 102, accent);
-        codex_bitmap(45, y + 11, row->session.title, CODEX_TITLE_HEIGHT, white);
-        codex_status(594, y + 20, row->session.state);
-        if (row->has_preview) codex_bitmap(45, y + 52, row->preview, CODEX_PREVIEW_HEIGHT, rgb(189, 204, 220));
+        int title_y = y + (ROW_HEIGHT - CODEX_TITLE_HEIGHT - CODEX_PREVIEW_HEIGHT - UI_SPACE) / 2;
+        list_row(y, ROW_HEIGHT, focus == i);
+        codex_bitmap(CONTENT_X, title_y, row->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
+        codex_status(WIDTH - UI_INSET, title_y + 25, row->session.state);
+        if (row->has_preview)
+            codex_bitmap(CONTENT_X, title_y + CODEX_TITLE_HEIGHT + UI_SPACE, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
     }
-    text_at(26, 440, "SW2 DETAILS", 2, muted);
-    if (snapshot->count > 1) text_at(414, 440, "JOYSTICK UP DOWN", 2, muted);
+    footer("SW2: details", NULL, snapshot->count > 1 ? move_hint : NULL);
+}
+
+static void draw_placeholder(const app_view_t *app)
+{
+    page_title(app_title(app->current));
+    rect(UI_LEFT_MARGIN, UI_CONTENT_TOP, CONTENT_WIDTH, 160, UI_SURFACE);
+    text_at(CONTENT_X, UI_CONTENT_TOP + 38, "Button presses", UI_FONT_BODY, UI_TEXT);
+    char count[20];
+    snprintf(count, sizeof(count), "%u", app->presses);
+    text_at(CONTENT_X, UI_CONTENT_TOP + 92, count, UI_FONT_TITLE, UI_TEXT);
+    text_at(CONTENT_X, UI_CONTENT_TOP + 135, "Resets when you switch apps", UI_FONT_HINT, UI_SECONDARY);
+    footer(apps_hint, NULL, NULL);
+}
+
+void app_ui_sleep_warning(uint16_t *buffer)
+{
+    begin_frame(buffer);
+    const char *label = "Zzz...";
+    text_at((WIDTH - text_width(label, UI_FONT_TITLE)) / 2, HEIGHT / 2 + 12, label, UI_FONT_TITLE, UI_TEXT);
 }
 
 void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
 {
-    fb = buffer;
-    const uint16_t bg = rgb(11, 19, 35), card = rgb(22, 35, 56);
-    const uint16_t white = rgb(238, 245, 255), muted = rgb(137, 160, 186);
-    const uint16_t accent = rgb(54, 222, 174);
+    begin_frame(buffer);
     if (state->app.choosing) {
-        rect(0, 0, WIDTH, HEIGHT, bg);
-        rect(0, 0, WIDTH, 6, accent);
-        text_at(26, 28, "SELECT APP", 3, white);
-        text_at(26, 65, "HOLD SW KEYS  JOYSTICK UP DOWN", 2, muted);
-        for (unsigned i = 0; i < JINTAI_APP_COUNT; ++i) {
-            bool selected = i == state->app.selected;
-            int y = 102 + (int)i * 73;
-            rect(26, y, 588, 62, selected ? accent : card);
-            text_at(46, y + 21, app_name(i), 3, selected ? bg : white);
-            if (i == state->app.current) text_at(478, y + 23, "ACTIVE", 2, selected ? bg : muted);
-        }
-        text_at(26, 425, "RELEASE SW KEYS TO SWITCH", 2, muted);
-    } else if (state->app.current == 0) {
-        draw_diagnostics(state);
-    } else if (state->app.current == 1) {
-        rect(0, 0, WIDTH, HEIGHT, bg);
-        rect(0, 0, WIDTH, 6, accent);
-        text_at(26, 28, "MOUSE", 3, white);
-        rect(26, 100, 588, 252, card);
-        text_at(46, 125, "MODE", 2, muted);
-        text_at(46, 160, state->app.mouse_scroll ? "SCROLL" : "CURSOR", 4, accent);
-        text_at(46, 225, "SW1 MODE  SW2 RIGHT  SW3 LEFT", 2, white);
-        text_at(46, 265, "SW1 SW2 BACK  SW2 SW3 FORWARD", 2, white);
-        text_at(46, 305, "TOUCH MOVE  TAP LEFT", 2, white);
-        text_at(46, 329, "TWO FINGERS SCROLL  TAP RIGHT", 2, white);
-        text_at(26, 425, "HOLD SW1 SW2 SW3 FOR APPS", 2, muted);
-    } else if (state->app.current == JINTAI_CODEX_APP) {
-        draw_codex(state);
-    } else {
-        rect(0, 0, WIDTH, HEIGHT, bg);
-        rect(0, 0, WIDTH, 6, accent);
-        text_at(26, 28, app_name(state->app.current), 3, white);
-        text_at(26, 72, "PLACEHOLDER", 2, muted);
-        rect(26, 120, 588, 220, card);
-        text_at(46, 150, "SW PRESS COUNT", 2, white);
-        char count[20];
-        snprintf(count, sizeof(count), "%u", state->app.presses);
-        text_at(46, 190, count, 4, accent);
-        text_at(46, 275, "STATE RESETS ON APP SWITCH", 2, muted);
-        text_at(26, 425, "HOLD SW1 SW2 SW3 FOR APPS", 2, muted);
+        draw_selector(&state->app);
+        return;
+    }
+    switch (state->app.current) {
+        case 0: draw_diagnostics(state); break;
+        case 1: draw_mouse(&state->app); break;
+        case JINTAI_CODEX_APP: draw_codex(state); break;
+        default: draw_placeholder(&state->app); break;
     }
 }
