@@ -1,131 +1,75 @@
-# 近台固件：ESP32-P4 应用与输入诊断
+# 近台 ESP32-P4 固件
 
-近台固件包含应用选择器、输入诊断台、鼠标、会话监看和 Clawd 桌宠。诊断台在屏幕上显示按键、摇杆和触控，在串口输出原始数据。测试范围：
+固件面向 ESP32-P4 v3，在 640×480 屏幕上提供会话监看、鼠标、输入诊断和 Clawd 桌宠。[界面预览](../README.md#应用界面)
 
-- SW1、SW2、SW3、摇杆中键：低电平表示按下，以约 20 ms 间隔采样，连续 3 次相同后输出状态变化。
-- 摇杆 X/Y：屏幕显示带死区的标准化数值（-1000 至 1000），串口每约 1 秒输出未经死区处理的 ADC 最小值、最大值和读取错误数。窗口极值不保证包含机械极限。
-- 摇杆位置示意使用启动时的稳定中心和本次运行逐方向观察到的最大偏移，绘制在等比例圆形坐标区；启动时请松开摇杆，再贴边转一两圈以学习行程。中心两侧各 60 ADC 为死区，屏幕读数和示意点在死区内保持为零；死区外重新缩放，极限仍对应 ±1000。初始行程不足 500 ADC 时使用临时分母；首圈学习时示意点可能越过参考圆，重启会重新校准。参考圆不是硬边界；示意图经过缩放，不代表物理角度或未经处理的原始轨迹。
-- 保留原有按键和摇杆界面，在有效触点位置叠加圆圈，并显示芯片报告的触点数量、进入诊断应用以来的最大报告数和可解析坐标数。最多解析和绘制两个坐标；更高的报告数仍会保留并提示。
-- 约每 20 ms 读取一次 CST826 原始报告，串口在报告数、有效坐标数变化和持续触摸时输出寄存器原始数据及有效坐标。双帧缓冲界面约每 100 ms 更新一次；时间间隔随任务调度和 I2C 响应变化。
-- 串口输出芯片修订号和内部可用堆内存；不初始化音频或 Wi-Fi，也不读写应用数据分区。
-- 所有应用共用屏幕休眠计时。连续 29 分钟无输入时显示黑底白字的 `Zzz...`，满 30 分钟时关闭背光、让显示面板休眠并暂停绘制。按键按下或松开、摇杆移动、触点按下、移动或抬起都会重置计时，也可唤醒屏幕。持续按住、摇杆或触点停在原位以及会话更新均不会重置计时。设备和输入采样继续运行。
+## 应用切换
 
-按键输入映射依据 [原项目输入驱动](https://github.com/ai-maker-lab/HachimoDock/blob/9a22e0f/firmware/main/pet_p4_input.c)：SW1 GPIO50、SW2 GPIO49、SW3 GPIO5、中键 GPIO4、X GPIO21、Y GPIO20。仅适用于已核对相同接线的板卡。短于消抖时间的按压可能不会被捕获，本测试不测响应延迟。
+1. 设备开机进入 `SESSIONS`。同时按住 SW1、SW2、SW3 打开应用选择器。
+2. 保持三个键按下，用摇杆上下选择。列表顺序为 `SESSIONS`、`MOUSE`、`INPUT LAB`、`CLAWD`，首尾循环。每次移动后先让摇杆回中。
+3. 松开全部三个键，切换到所选应用。切换后抬起触点、释放按键并让摇杆回中，即可开始操作。选回当前应用会继续原状态。
 
-## 应用选择和生命周期
+三键并击识别窗口约 180 ms，从第一个 SW 键消抖后开始。确认三个键均按下时立即打开选择器，这次并击由选择器处理。未形成并击时，缓存的事件按顺序交给当前应用。选择器打开期间，应用输入和诊断输出暂停。
 
-- 启动时进入选择器第一项 `SESSIONS`。同时按住 SW1、SW2、SW3，三个键消抖后立即打开选择器，继续按住并用摇杆上下移动。列表首尾循环，每次移动后需让摇杆回中。三个 SW 键全部松开时切换到选中的应用。选回当前应用可继续原状态。
-- 选择器依次列出 `SESSIONS`、`MOUSE`、`INPUT LAB` 和 `CLAWD`。切换应用时会重置旧应用的运行状态，Clawd 的状态会在本次开机期间保留。选回当前应用并松开按键会继续原状态。
-- 应用是编入固件的前台模块，目前不创建应用后台任务。输入采集、摇杆校准、显示驱动和休眠由系统统一管理；选择器打开时应用输入和诊断输出暂停。诊断台始终展示物理输入状态，选择器使用自己的输入规则。
-- 按键消抖后，从首个 SW 按键起约 180 ms 内三个键均按下可识别并击，先后顺序不限；三个键均确认按下后立即显示选择器，不额外等待长按；已识别的并击不会交给应用。未构成并击时，缓冲的按键事件会按顺序交给当前应用。选择器显示后，三个键全部松开才提交选择；切换或唤醒后，还需释放按键和触点、摇杆回中，才接受下一次应用操作。屏幕休眠时第一次输入只用于唤醒。
-- 固件界面标签使用内置英文字体。会话标题由 Mac 渲染。应用编入固件。
+应用作为前台模块编入固件。输入采集、摇杆校准、显示与休眠由系统统一管理。换到其他应用时重置旧应用运行状态，Clawd 桌宠状态保留到本次开机结束。
 
-应用选择和生命周期的自动测试：
+## 设备应用
 
-```sh
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/app_manager_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/jintai-app-manager-test
-/tmp/jintai-app-manager-test
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/screen_idle_test.c firmware/main/screen_idle.c -o /tmp/jintai-screen-idle-test
-/tmp/jintai-screen-idle-test
-```
+### 会话监看
 
-## 设备界面样式
+通过 CH343 USB-UART 连接设备并运行 Mac 菜单栏应用。列表最多保留 6 个会话，每屏显示 3 条。运行中的会话优先，随后是近 60 秒内结束的会话。每条显示原会话标题和最近回复的一行摘要，右侧蓝色点阵、绿色勾、红色叉和灰色短横分别表示运行、完成、失败和取消。屏幕也会显示等待 Mac、连接超时、会话来源不可用和暂无活跃会话等状态。[Mac 应用与会话来源](../host/README.md#会话监看)
 
-画布为纯黑，面板和正文使用灰阶，橙色用于小面积的交互反馈。左侧保留 32 px 页面边距，抵消设备两侧黑边的宽度差。标题、底栏和面板可以贴近上、下、右侧边缘。应用选择器和会话列表共用焦点行，页标题和底部操作提示也使用共用绘制函数。[颜色、间距和字体角色](main/app_ui_theme.h)
+| 操作 | 功能 |
+| --- | --- |
+| 摇杆上下 | 在会话列表中循环浏览，在详情中翻页 |
+| SW2 / SW3 | 打开详情 / 返回列表，详情显示最近一条可见回复，最多 24 页 |
+| SW1 | 摸摸列表里的 Clawd，睡着时也能叫醒 |
+| 摇杆左右 | 控制列表里的 Clawd，回中后恢复巡游 |
 
-固件的英文标签使用 Noto Sans 的 22、27、36 px 抗锯齿字形。字体数据预生成并随固件嵌入。修改字体后可用 Pillow 11.3.0 运行下方命令生成字形。[SIL OFL 1.1](main/app_ui_font.OFL.txt) · [Noto Sans 源字体](https://github.com/google/fonts/blob/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf)
+Clawd 以桌宠页一半的尺寸在列表底部巡游，常态宽约 120 像素。它随机走约 1.8–3.6 秒，停下呼吸约 2–3.2 秒，有时会在停歇后掉头，到两端也会停歇。道具和角色可能短暂遮盖部分会话。走路范围从左侧 32 px 页面边距到屏幕右侧，较宽的动作会在边缘向内调整。
 
-```sh
-python3 firmware/scripts/build_ui_font.py /path/to/NotoSans.ttf firmware/main/app_ui_font.bin
-```
+会话进入运行、完成、失败或取消时各有偏好的随机动作，表演结束后继续巡游。手动互动从全部 8 个动作中选取，与会话事件共享最近两次的动作记录。移动时按 SW1，回中后播放动作。无运行中的会话时，Clawd 会走到一侧打盹。重新打开列表后，第一份有效快照作为状态基线。[会话与桌宠验证记录](../experiments/2026-11-18-clawd-sessions.md)
 
-## 会话监看
+### 鼠标
 
-通过 CH343 USB-UART 连接并运行 [Mac 菜单栏应用](../host/README.md)，在设备选择 `SESSIONS`。每屏最多 3 条，摇杆上下浏览列表中的最多 6 个会话。运行中的会话优先占用列表名额，随后是近 60 秒内结束的会话。状态占一个字符位，运行时循环显示蓝色盲文点阵 `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏`，绿色勾、红色叉和灰色短横分别表示完成、失败和取消。屏幕会区分等待 Mac、连接超时、会话来源不可用和暂无活跃会话。
+| 操作 | 功能 |
+| --- | --- |
+| 摇杆 | 移动光标，持续推动会加速至上限，回中后重置加速 |
+| SW1 | 切换光标和滚轮模式，滚轮模式支持纵向和横向滚动 |
+| SW2 / SW3 | 右键 / 左键 |
+| SW1 + SW2 / SW2 + SW3 | 鼠标 4（返回）/ 鼠标 5（前进） |
+| 单指滑动 / 轻点 | 移动光标 / 左键，连续两次轻点可双击 |
+| 双指滑动 / 轻点 | 滚动 / 右键，双指手势后需全部抬起才开始下一次手势 |
 
-每条会话显示标题和最近回复的一行摘要，状态位于标题行右侧。列表右上角显示选中序号和会话总数，摇杆上下可在首尾之间循环。选中后按 SW2 打开详情，用摇杆上下翻页，按 SW3 返回列表。三键并击仍会打开应用选择器。详情显示最近一条可见回复，最多 24 页。
+触摸可与摇杆和实体按键同时使用。单键短按在松开后发送，按住超过并击窗口时发送按下。窗口内确认双键时抑制各自的单键动作，三键优先打开选择器。单键或双键已经送出时，先松开所有 SW 键再开始下一次并击。切换应用或唤醒时会释放鼠标按键，重新进入鼠标应用时从光标模式开始。初次使用可将摇杆向四个方向推到边缘，帮助系统学习行程。
 
-Clawd 以桌宠页一半的宽高在会话列表底部巡游，常态宽约 120 像素。它随机走约 1.8–3.6 秒，停下呼吸约 2–3.2 秒，有时歇完会原地掉头。到两端也会歇一下。透明动画使用完整的道具轨迹，经过会暂时遮住部分会话。开始运行、完成、失败和取消各有偏好的随机动作，跨事件排除最近两次。收到事件后它会停下表演，演完继续巡游。无运行中的会话时，它走到一侧打盹。重新打开列表后，第一份有效快照作为状态基线。
+- **USB-UART 与 Mac** · 通过现有 CH343 路径连接，启动 Mac 菜单栏应用并授予辅助功能权限。桥接根据摇杆幅度产生连续像素滚动，固件与桥接程序需使用同版本。[启动和授权](../host/README.md)
+- **原生 USB HID** · 与原项目使用相同切换电路的板卡可通过短接跳线，将共用的 Type-C 接口切至 USB HS OTG，作为五键鼠标使用。跳线断开时走 CH343，提供串口日志和会话监看。操作前核对实际板卡接线。原生 HID 枚举和其他系统的行为待实机验证，侧键与横向滚动的表现随系统和应用而异。[原项目接线说明](https://github.com/ai-maker-lab/HachimoDock/blob/9a22e0f/firmware/README.md)
 
-会话列表里的 `SW1` 可摸摸 Clawd。它会从全部八种趣味动作中选一个来表演，打盹时也可以叫醒。手动互动和会话事件共用最近两次的动作记录。摇杆左右可直接控制 Clawd，上下浏览会话。松开摇杆后恢复巡游，移动时按下的 `SW1` 在回中后触发。
+USB-UART 路径上的光标、左右键、滚轮、浏览器前进后退与触控板手势已有实机记录。[USB 鼠标](../experiments/2026-11-17-usb-mouse.md) · [触控板实验](../experiments/2026-11-17-touchpad.md)
 
-巡游和左右控制的范围按走路时的角色宽度计算，右端贴屏幕，左端贴 32 像素页面边距。较宽的动画在边缘播放时会向内留出空间，完整显示道具和身体。
+### 输入诊断
 
-2026-11-18 烧录 965,600 字节的应用镜像，写入校验通过。串口确认设备启动、时钟同步，并收到两条运行中的会话。主机测试覆盖动作去重、状态优先级和巡游，软件渲染检查了会话叠加效果及全部 302 帧的半尺寸边界。
+- **按键** · SW1、SW2、SW3 和摇杆中键以低电平表示按下，约每 20 ms 采样一次，连续 3 次读数相同后报告状态变化。画面显示物理按键状态，短于消抖时间的操作可能被漏采。
+- **摇杆** · 启动时松开摇杆，让系统学习稳定中心。启动后沿边缘转一两圈，学习各方向行程。屏幕按 ±60 ADC 死区和逐方向行程换算显示范围 −1000 至 1000 的数值。初始行程不足 500 ADC 时用临时分母，首圈示意点可能越过等比例参考圆。重启后重新校准。诊断期间串口约每秒输出未经死区处理的 ADC 窗口最小值、最大值和读取错误数。[摇杆校准实验](../experiments/2026-11-17-joystick-visualization.md)
+- **触控** · 约每 20 ms 从 CST826 的 I2C 地址 `0x38`、寄存器 `0x02` 开始读取 13 个字节。屏幕显示报告点数 `Touch`、有效坐标数 `Valid` 和本次进入诊断台以来的最大报告点数 `Max`。最多解析和绘制两个坐标，更高的报告点数仍显示。诊断期间，触点计数变化与持续触摸会输出原始报告和有效坐标。双帧缓冲界面约每 100 ms 更新一次，实际间隔取决于任务调度和 I2C 响应。[触控实验](../experiments/2026-11-17-touch-limit.md) · [CST826 数据手册](https://surenoo.tech/download/04_STP/Controller/CST826.pdf)
 
-同日更新随机停走、应用选择顺序和走路朝向。965,936 字节的应用镜像通过烧录校验，串口确认诊断台启动及会话同步。主机测试验证选择顺序和巡游，软件渲染逐帧检查了原寸和半尺寸动画的左右眼睛朝向。
+在采用同一接线的板卡上，SW1、SW2、SW3、摇杆中键分别是 GPIO50、GPIO49、GPIO5、GPIO4，摇杆 X/Y 分别是 GPIO21/GPIO20。[原项目输入驱动](https://github.com/ai-maker-lab/HachimoDock/blob/9a22e0f/firmware/main/pet_p4_input.c)
 
-同日加入会话列表的 `SW1` 互动及左右控制。966,288 字节的应用镜像通过烧录校验，设备正常启动并收到会话快照。主机与软件渲染联动测试验证了按键、左右接管和摇杆回中后播放动作。
+### Clawd 桌宠
 
-同日烧录 966,688 字节的应用镜像，串口确认开机进入 `SESSIONS` 并收到会话快照。软件渲染逐帧确认走路贴到左侧页面边距和右侧屏幕边缘，边缘呼吸动作最多向内调整 10 像素。
+摇杆四向控制走路，中键切换睡觉和起床。按任意一个 SW 键或点 Clawd，会从 8 个趣味动作中随机挑选。约每 30 秒也会自动挑一次，三种触发方式共用最近两次的动作记录。走路或表演时，自动动作等到空闲才播放。睡觉时跳过自动动作，醒来后重新计时。
 
-```sh
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/sessions_clawd_test.c firmware/main/sessions_clawd.c firmware/main/clawd.c -o /tmp/jintai-sessions-clawd-test
-/tmp/jintai-sessions-clawd-test
-```
+右上角显示 24 小时制本地时间。Mac 菜单栏应用通过串口校时，设备同步后继续计时，重启后重新请求。首次校时前显示 `--:--`。[桌宠与校时验证记录](../experiments/2026-11-18-clawd-sessions.md)
 
-原生 HID 连接需要切换 USB 路径，会话监看使用 CH343 串口路径。
+## 屏幕休眠
 
-## Clawd 桌宠
+所有应用共用休眠计时。连续 29 分钟无输入时显示 `Zzz...`，满 30 分钟关闭背光、让面板休眠并暂停绘制，设备和输入采样继续运行。实体按键改变状态、移动摇杆或触点变化会重置计时。按键持续按住、摇杆或触点停在原位，以及会话更新时，计时继续。
 
-在选择器里进入 `CLAWD`。摇杆四向控制走路，中键切换睡觉和起床。按任意一个 SW 键或点 Clawd，会从同一组 8 个趣味动作中随机选一个。约每 30 秒也从这组动作自动选一次，三种触发方式共用最近两次的记录，连续三次动作各不相同。到点时若在走路或表演，会等到空闲。睡觉时跳过自动动作，醒来后重新计时。
-
-桌宠页采用纯黑画布，动画以共用脚底锚点按 640×480 屏幕的显示尺寸直接生成像素，角色常态宽约 240 像素。右上角显示 24 小时制时间，由 Mac 菜单栏应用通过串口同步。首次校时前显示 `--:--`，同步后由设备继续计时，重启后重新同步。
-
-动画帧保留 4 位透明度，绘制函数可按整数比例缩小后叠到其他应用界面。帧采用逐帧压缩，以便在现有应用分区内保存原寸像素。SVG 主要取自 [Clawd Tank 的固定提交](https://github.com/marciogranzotto/clawd-tank/tree/ee5c079c45a39e06e79b7a39f3e6d9beca223021/assets/svg-animations)，上游 [MIT 许可](assets/clawd/LICENSE)随素材保留。近台调整了开心跳的幅度，并添加了吃饼干动画。Clawd 是 Anthropic 的 Claude Code 吉祥物。
-
-2026-11-18 首版烧录使用 ESP32-P4 v3.2 设备的 factory 应用区 `0x10000`。545,328 字节的镜像通过烧录哈希校验，启动串口报告 PSRAM 测试、CST826、640×480 屏幕和摇杆校准均成功。
-
-同日四倍缩放版本在同一设备更新 factory 应用区。968,400 字节的镜像通过烧录哈希校验，设备成功启动，并通过 CH343 串口收到与 Mac 本地时间一致的校时。主机测试覆盖待机轮换和互动切换，软件渲染验证了全部 302 帧的缩放和裁切。
-
-同日原寸像素版本的 964,448 字节镜像通过烧录校验，设备启动和 Mac 校时成功。主机测试验证手动和自动触发共享最近两次的记录、睡眠时跳过自动动作，以及走路结束后播放到期动作。软件渲染复核了全部 302 帧。
-
-修改 SVG 后可用 Pillow 11.3.0 和 Playwright 1.59.0 重新生成嵌入固件的动画数据。常规固件构建直接使用已生成文件。
-
-```sh
-python3 -m playwright install chromium
-python3 firmware/scripts/build_clawd_frames.py
-```
-
-## 鼠标应用
-
-选择 `MOUSE` 后，可使用现有 USB-UART 连接配合 Mac 桥接程序，也可切换到原生 USB HS OTG、作为五键 HID 鼠标使用。摇杆默认控制光标，持续推动时光标逐渐加速并有最高速度，回中后重置加速；SW1 切换光标和滚轮模式；滚轮模式下上下滚动，左右控制水平滚动。Mac 桥接根据摇杆幅度发送连续像素滚动，需使用同版本的固件和桥接程序。SW2 是右键，SW3 是左键；SW1+SW2 是鼠标 4（返回），SW2+SW3 是鼠标 5（前进）。单键和双键均支持按住，两个并击键全部松开时释放侧键。各系统、应用对侧键和水平滚动的行为可能不同。
-
-为区分单键、双键与三键选择器，从第一个按键消抖后起有约 180 ms 的并击识别窗口；窗口内按下的双键会抑制各自的单键动作，三键优先打开应用选择器。单键短按会在松开后发送，单键按住超过窗口后发送按下。已经送出单键或双键的情况下，后续加入的键不会触发三键选择器；先全部松开再重新并击。切换应用或唤醒时释放鼠标按键，切换到其他应用后再回来会重置为光标模式。在 `MOUSE` 中，触摸屏也可作为触控板：单指滑动移动光标，轻点左键，双指滑动滚动，双指轻点右键。连续两次轻点可双击；双指操作后需全部抬起才开始下一次手势。触摸与摇杆、物理按键可以同时使用；触摸唤醒屏幕后需先抬手，再进行操作。摇杆校准方法沿用诊断台；初次使用可先沿四个方向推到边缘，使系统学习行程。
-
-### 现有 USB-UART 连接与 Mac
-
-无需调整硬件。用 USB 线连接设备，在 Mac 的终端运行：
-
-```sh
-host/start-mouse-bridge.sh
-```
-
-首次运行会编译并启动菜单栏应用 `host/Jintai.app`；以后可在 Finder 中双击启动。点击屏幕右上角的近台图标，可查看连接和辅助功能权限、启停鼠标桥接、选择串口或退出。多个兼容串口同时连接时，需要在菜单中选择；设备重新连接后应用会尝试连接上次选中的串口。需要在 macOS 辅助功能设置中允许“近台”。设备重启后仍需重新选择 `MOUSE`。应用占用串口时不能同时烧录或使用其他串口监视器；退出应用后即可使用。构建、权限及测试说明见 [Mac 应用说明](../host/README.md)。
-
-2026-11-17 已在当前 Mac 和 USB-UART 连接上实测光标、左右键、滚轮及浏览器返回/前进，详见[实验记录](../experiments/2026-11-17-usb-mouse.md)。
-
-### 原生 USB 连接
-
-对于与原项目相同 USB 切换电路的板卡，需将 Type-C 路径切换至原生 USB（跳线短接）并连接电脑；跳线断开时是 CH343 USB-UART，无法作为 HID 鼠标。切换前请核对实际板卡接线，原项目的[连接说明](https://github.com/ai-maker-lab/HachimoDock/blob/9a22e0f/firmware/README.md)提供参考。此两种路径共用接口，切到原生 USB 后 USB-UART 日志不可通过同一接口读取。原生 USB 枚举和其他系统的行为尚未实机验证。
-
-触控板手势的主机测试：
-
-```sh
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touchpad_test.c firmware/main/touchpad.c -o /tmp/jintai-touchpad-test
-/tmp/jintai-touchpad-test
-```
-
-鼠标和并击逻辑的主机测试：
-
-```sh
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/mouse_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/jintai-mouse-test
-/tmp/jintai-mouse-test
-```
+休眠后的首次输入用于唤醒。随后释放按键和触点、让摇杆回中，再进行应用操作。
 
 ## 构建
 
-需要 Python 3.10+ 和 PlatformIO Core 6.1.19，首次构建需要联网下载 ESP-IDF 和工具链。以仓库根目录为工作目录，例如：
+需要 Python 3.10+ 和 PlatformIO Core 6.1.19，首次构建需要联网下载 ESP-IDF 和工具链。在仓库根目录运行：
 
 ```sh
 python3 -m venv .venv
@@ -133,36 +77,56 @@ python3 -m venv .venv
 .venv/bin/pio run -d firmware
 ```
 
-构建产物在 `firmware/.pio/build/p4_v3/`，其中 `firmware.bin` 是应用镜像。环境选择 ESP32-P4 v3，平台版本与原项目本机参考源码一致；本固件并非原项目固件。构建脚本会检查芯片版本范围，并为镜像标注 v3.0–v3.99；它会移除 PlatformIO 自动生成的完整合并镜像，避免误认为它是恢复包。
-
-2026-11-17 已在本机用 ESP-IDF 5.5.4 编译成功，并检查应用镜像校验和及 v3 版本范围。构建时内存统计工具报告 `cannot assign memory region sram_seg to chip memory type`，编译仍成功。此前诊断版本已在本机设备烧录并验证按键和摇杆输入；应用选择和鼠标版本的实机观察分别见[应用选择实验记录](../experiments/2026-11-17-app-switching.md)和[鼠标实验记录](../experiments/2026-11-17-usb-mouse.md)。此前验证详见[输入实验记录](../experiments/2026-11-17-input-firmware.md)和[屏幕实验记录](../experiments/2026-11-17-display-firmware.md)。
+应用镜像位于 `firmware/.pio/build/p4_v3/firmware.bin`。构建脚本检查目标芯片版本，为镜像标注 v3.0–v3.99，并移除 PlatformIO 自动生成的完整合并镜像。已用 ESP-IDF 5.5.4 完成构建。内存统计阶段有过 `cannot assign memory region sram_seg to chip memory type` 告警，应用镜像仍成功生成。[构建与启动记录](../experiments/2026-11-17-usb-mouse.md)
 
 ## 实机运行与恢复
 
-已在本机设备验证过烧录和输入读取；恢复原项目固件尚未实机验证，暂不提供一键上传命令。固件的默认分区布局与原设备布局不保证一致；完整烧录或写入分区表可能覆盖原有数据，也不能假定自动回滚适用。先核对设备板型、当前分区和恢复方案，并备份需要保留的内容。原项目 [v0.1.217 发布页](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217)提供 R206 各板型完整烧录包，完整恢复会覆盖设备数据。
+烧录前核对板型、当前分区及恢复路径，并备份需要保留的设备数据。独立固件的默认分区布局可能与原设备不同，整套烧录或改写分区表可能覆盖设备数据。原项目固件的完整恢复待实机验证，R206 各板型的恢复包见原项目发布页。[HachimoDock v0.1.217](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217)
 
-实际运行时通过 USB-UART 以 115200 baud 读取串口日志，按下和松开每个按键，再推动摇杆观察每秒的 X/Y 范围。原固件日常通信波特率不同，不要用本固件的日志速率判断原固件是否正常。首次实机测试应记录设备、固件构建版本、日志与测试条件。
+通过 USB-UART 以 115200 baud 查看近台日志，启动信息包括芯片修订号和可用堆内存。输入数据可在 `INPUT LAB` 查看。Mac 菜单栏应用运行时会占用串口，烧录或打开串口监视器前先从菜单退出。固件运行时未初始化音频或 Wi-Fi，也未读写应用数据分区。[独立固件首次烧录](../experiments/2026-11-17-input-firmware.md)
 
-## 摇杆计算测试
+## 主机测试
+
+以下命令在仓库根目录运行，覆盖应用切换、休眠、会话 Clawd、鼠标并击、触控板、摇杆与触控报告。
 
 ```sh
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/app_manager_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/jintai-app-manager-test
+/tmp/jintai-app-manager-test
+
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/screen_idle_test.c firmware/main/screen_idle.c -o /tmp/jintai-screen-idle-test
+/tmp/jintai-screen-idle-test
+
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/sessions_clawd_test.c firmware/main/sessions_clawd.c firmware/main/clawd.c -o /tmp/jintai-sessions-clawd-test
+/tmp/jintai-sessions-clawd-test
+
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/mouse_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/jintai-mouse-test
+/tmp/jintai-mouse-test
+
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touchpad_test.c firmware/main/touchpad.c -o /tmp/jintai-touchpad-test
+/tmp/jintai-touchpad-test
+
 cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/joystick_test.c firmware/main/joystick.c -o /tmp/jintai-joystick-test
 /tmp/jintai-joystick-test
-```
 
-具体测试条件和原始范围见[摇杆实验记录](../experiments/2026-11-17-joystick-visualization.md)。
-
-## 触控报告范围
-
-面板采用 CST826，读取 I2C 地址 `0x38`、寄存器 `0x02` 起的 13 个字节；只按已有的两个触点槽位尝试解析坐标。`TOUCH` 是报告的触点数，`VALID` 是解析为有效坐标的数量，`MAX` 是本次进入诊断应用以来最大的报告数。高于 2 的报告数会记录，但不会将额外字节假设为坐标。芯片报告触点抬起或不再报告时，圆圈随之消失，不补造触点。芯片资料提到双点能力，具体面板与芯片固件仍以实测为准。[CST826 数据手册](https://surenoo.tech/download/04_STP/Controller/CST826.pdf)
-
-触控解析的主机测试可在仓库根目录运行：
-
-```sh
 cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touch_format_test.c firmware/main/touch_format.c -o /tmp/jintai-touch-format-test
 /tmp/jintai-touch-format-test
 ```
 
-## 第三方代码
+## 设备界面与素材构建
 
-ST7701 MIPI 驱动和面板初始化命令参考并包含原项目的 Apache-2.0 组件代码，来源及许可证详见 [驱动说明](components/st7701/NOTICE.md) 和 [许可证](components/st7701/LICENSE)。
+设备画布为纯黑，面板和正文采用灰阶，橙色用于小面积交互反馈。左侧 32 px 页面边距抵消设备两侧硬件黑边的宽度差。应用选择器和会话列表共用焦点行，各页面共用标题和操作提示。固件英文标签使用嵌入的 Noto Sans 22、27、36 px 抗锯齿字形，会话标题和回复由 Mac 渲染。[界面样式定义](main/app_ui_theme.h)
+
+Clawd 帧按设备显示尺寸生成，常态角色宽约 240 px，采用共用脚底锚点、4 位透明度和逐帧压缩。会话列表以一半尺寸绘制。常规构建直接使用预生成的字形和动画数据。更新时用 Pillow 11.3.0 生成字形，动画另需 Playwright 1.59.0。在仓库根目录运行：
+
+```sh
+python3 firmware/scripts/build_ui_font.py /path/to/NotoSans.ttf firmware/main/app_ui_font.bin
+
+python3 -m playwright install chromium
+python3 firmware/scripts/build_clawd_frames.py
+```
+
+## 第三方代码与素材
+
+- **ST7701** · MIPI 驱动与面板初始化包含 HachimoDock 的 Apache-2.0 组件。[驱动来源](components/st7701/NOTICE.md) · [许可证](components/st7701/LICENSE)
+- **Noto Sans** · 固件中的预生成字形。[源字体](https://github.com/google/fonts/blob/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf) · [SIL OFL 1.1](main/app_ui_font.OFL.txt)
+- **Clawd** · Anthropic 的 Claude Code 吉祥物。动画 SVG 主要来自 Clawd Tank，近台调整了开心跳的幅度并增加了吃饼干动画。[上游动画素材](https://github.com/marciogranzotto/clawd-tank/tree/ee5c079c45a39e06e79b7a39f3e6d9beca223021/assets/svg-animations) · [MIT 许可](assets/clawd/LICENSE)
