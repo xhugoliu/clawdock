@@ -104,7 +104,7 @@ with tempfile.TemporaryDirectory() as temp:
     today = home / 'sessions' / dt.datetime.now().strftime('%Y/%m/%d')
     old.mkdir(parents=True)
     today.mkdir(parents=True, exist_ok=True)
-    running, other, historical, child = [uuid.uuid4() for _ in range(4)]
+    running, other, historical, child, long_running, long_completed, stale = [uuid.uuid4() for _ in range(7)]
     reply = '\n'.join(f'第 {number} 行近台测试。' for number in range(1, 29))
     visible = record('response_item', {'type': 'message', 'role': 'assistant', 'phase': 'commentary',
                                        'content': [{'type': 'output_text', 'text': reply}]}, 11)
@@ -114,6 +114,13 @@ with tempfile.TemporaryDirectory() as temp:
     second = fixture(today, other, event('task_started', 'b', 10), ago=15)
     fixture(old, historical, event('task_started', 'old', 20) + event('task_complete', 'old', 19), ago=21)
     fixture(old, child, event('task_started', 'sub', 4), ago=5, subagent=True)
+    # The latest turn started before the tail. A single tool result spans more than one read block.
+    large_result = record('response_item', {'type': 'function_call_output', 'output': 'x' * (2 * 1024 * 1024 + 64)}, 5)
+    long_log = fixture(old, long_running, event('task_started', 'long', 3600) + large_result +
+                       event('token_count', 'long', 4), ago=3601)
+    fixture(old, long_completed, event('task_started', 'complete', 3600) +
+            event('task_complete', 'complete', 20) + large_result + event('token_count', 'complete', 4), ago=3601)
+    fixture(old, stale, event('task_started', 'stale', 3600) + large_result + event('token_count', 'stale', 601), ago=3601)
     title = '近台会话状态和标题栏的长标题截断验证'
     (home / 'session_index.jsonl').write_text(json.dumps({'id': str(running), 'thread_name': title}) + '\n')
 
@@ -124,7 +131,7 @@ with tempfile.TemporaryDirectory() as temp:
         assert proc.stdout is not None
         assert '测试串口已连接' in proc.stdout.readline().decode()
         rows = poll(master)
-        assert {key: value[0] for key, value in rows.items()} == {running: 1, other: 1}
+        assert {key: value[0] for key, value in rows.items()} == {running: 1, other: 1, long_running: 1}
         assert sum(bin(byte).count('1') for byte in rows[running][1]) > 100, 'CJK title is empty or incomplete'
         assert rows[running][1] != rows[other][1], 'title index was ignored'
         title_bitmap = rows[running][1]
@@ -150,11 +157,15 @@ with tempfile.TemporaryDirectory() as temp:
         with second.open('ab') as file:
             file.write(interrupted[:30])
         completed = poll(master)
-        assert {key: value[0] for key, value in completed.items()} == {running: 2, other: 1}
+        assert {key: value[0] for key, value in completed.items()} == {running: 2, other: 1, long_running: 1}
         assert any(completed[running][2]) and completed[running][2] != rows[running][2]
         with second.open('ab') as file:
             file.write(interrupted[30:])
-        assert {key: value[0] for key, value in poll(master).items()} == {running: 2, other: 4}
+        assert {key: value[0] for key, value in poll(master).items()} == {running: 2, other: 4, long_running: 1}
+        # A completion arriving in an oversized append still closes the already visible turn.
+        with long_log.open('ab') as file:
+            file.write(event('task_complete', 'long', 1) + large_result + event('token_count', 'long'))
+        assert {key: value[0] for key, value in poll(master).items()} == {running: 2, other: 4, long_running: 2}
         os.close(master)
         master = -1
         assert proc.wait(timeout=3) == 0

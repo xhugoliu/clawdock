@@ -18,6 +18,14 @@ final class CodexSessions {
     private static let activeFor: TimeInterval = 600
     private static let retainFor: TimeInterval = 60
     private static let tailBytes = 1024 * 1024
+    private static let startEvents: Set<String> = ["task_started", "turn_started"]
+    private static let endStates: [String: CodexSessionState] = [
+        "task_complete": .completed, "turn_completed": .completed,
+        "task_failed": .failed, "turn_failed": .failed,
+        "turn_aborted": .cancelled, "turn_cancelled": .cancelled
+    ]
+    private static let lifecycleMarkers = (["turn_context"] + startEvents + endStates.keys)
+        .map { Data("\"\($0)\"".utf8) }
 
     private struct Rollout {
         let id: UUID
@@ -171,18 +179,14 @@ final class CodexSessions {
         }
         guard var row = cursor else { return }
         let bounded = size - row.offset > Self.tailBytes
-        let start = bounded ? size - UInt64(Self.tailBytes) : row.offset
-        if bounded {
-            row.turn = nil
-            row.startedAt = .distantPast
-            row.updatedAt = .distantPast
-            row.state = nil
-            row.reply = nil
-        }
+        // Include the preceding byte so a tail starting on a line boundary keeps its first record.
+        let start = bounded ? size - UInt64(Self.tailBytes) - 1 : row.offset
         do {
             try handle.seek(toOffset: start)
-            guard let data = try handle.read(upToCount: Self.tailBytes), let end = data.lastIndex(of: 10) else { return }
+            guard let data = try handle.read(upToCount: Self.tailBytes + (bounded ? 1 : 0)),
+                  let end = data.lastIndex(of: 10) else { return }
             var lineStart = bounded ? (data.firstIndex(of: 10) ?? end) + 1 : data.startIndex
+            if bounded { try recoverTurn(handle, before: start + UInt64(lineStart), into: &row) }
             while lineStart <= end, let newline = data[lineStart...end].firstIndex(of: 10) {
                 if let record = object(data[lineStart..<newline]) { apply(record, to: &row) }
                 lineStart = newline + 1
@@ -193,6 +197,53 @@ final class CodexSessions {
         } catch { return }
     }
 
+    private func recoverTurn(_ handle: FileHandle, before end: UInt64, into row: inout Rollout) throws {
+        var upper = end
+        var fragment: Data? = Data()
+        var transitions: [[String: Any]] = []
+        var contextTurn: String?
+
+        // Recover lifecycle records from the skipped region in blocks. A context can repeat
+        // within a turn, so keep looking for its start or the previous turn's boundary.
+        scan: while upper > row.offset {
+            let lower = upper - min(upper - row.offset, UInt64(Self.tailBytes))
+            let length = Int(upper - lower)
+            try handle.seek(toOffset: lower)
+            guard let data = try handle.read(upToCount: length), data.count == length else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            let parts = data.split(separator: 10, omittingEmptySubsequences: false)
+            for index in parts.indices.reversed() {
+                let part = parts[index]
+                let line = fragment.flatMap { suffix in
+                    part.count + suffix.count <= Self.tailBytes ? (suffix.isEmpty ? part : part + suffix) : nil
+                }
+                if index == 0 && lower > row.offset {
+                    fragment = line
+                    break
+                }
+                fragment = Data()
+                guard let line, Self.lifecycleMarkers.contains(where: { line.range(of: $0) != nil }),
+                      let record = object(line), let type = record["type"] as? String,
+                      let payload = record["payload"] as? [String: Any],
+                      let timestamp = record["timestamp"] as? String,
+                      fractionalTime.date(from: timestamp) != nil || time.date(from: timestamp) != nil else { continue }
+
+                let event = payload["type"] as? String ?? ""
+                if type == "event_msg" && Self.endStates[event] != nil {
+                    transitions.append(record)
+                } else if (type == "turn_context" || (type == "event_msg" && Self.startEvents.contains(event))),
+                          let turn = payload["turn_id"] as? String {
+                    transitions.append(record)
+                    if type == "event_msg" || (contextTurn != nil && contextTurn != turn) { break scan }
+                    contextTurn = turn
+                }
+            }
+            upper = lower
+        }
+        for record in transitions.reversed() { apply(record, to: &row) }
+    }
+
     private func apply(_ record: [String: Any], to row: inout Rollout) {
         guard let type = record["type"] as? String,
               type == "event_msg" || type == "turn_context" || type == "response_item",
@@ -200,8 +251,8 @@ final class CodexSessions {
               let date = fractionalTime.date(from: timestamp) ?? time.date(from: timestamp), date >= row.updatedAt,
               let payload = record["payload"] as? [String: Any] else { return }
         let turn = payload["turn_id"] as? String
-        let event = payload["type"] as? String
-        if type == "turn_context" || event == "task_started" || event == "turn_started" {
+        let event = payload["type"] as? String ?? ""
+        if type == "turn_context" || (type == "event_msg" && Self.startEvents.contains(event)) {
             guard let turn else { return }
             if row.turn != turn || row.state == nil {
                 row.turn = turn
@@ -218,17 +269,13 @@ final class CodexSessions {
                       return part["text"] as? String
                   }.joined(separator: "\n")) else { return }
             row.reply = text
-        } else if let event {
+        } else if let state = Self.endStates[event] {
+            if let turn, let current = row.turn, turn != current { return }
+            row.turn = turn ?? row.turn
+            row.state = state
+            if state == .completed, let text = replyText(payload["last_agent_message"] as? String) { row.reply = text }
+        } else {
             switch event {
-            case "task_complete", "turn_completed", "task_failed", "turn_failed", "turn_aborted", "turn_cancelled":
-                if let turn, let current = row.turn, turn != current { return }
-                row.turn = turn ?? row.turn
-                if event == "task_complete" || event == "turn_completed" {
-                    row.state = .completed
-                    if let text = replyText(payload["last_agent_message"] as? String) { row.reply = text }
-                }
-                else if event == "task_failed" || event == "turn_failed" { row.state = .failed }
-                else { row.state = .cancelled }
             case "agent_message":
                 guard row.state == .running, turn == nil || turn == row.turn, visiblePhase(payload),
                       let text = replyText(payload["message"] as? String) else { return }
@@ -237,7 +284,7 @@ final class CodexSessions {
                 guard row.state == .running, turn == nil || turn == row.turn else { return }
             default: return
             }
-        } else { return }
+        }
         row.updatedAt = date
     }
 
