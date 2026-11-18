@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "display.h"
+#include "codex_uart.h"
 #include "joystick.h"
 #include "touch.h"
 #include "touchpad.h"
@@ -41,6 +42,10 @@ static button_t buttons[] = {
 };
 
 static QueueHandle_t display_queue;
+static union {
+    codex_snapshot_t list;
+    codex_detail_t detail;
+} display_codex;
 
 /* Native USB uses wheel steps; the serial bridge receives smooth scroll axes separately. */
 static void output_mouse_report(uint8_t buttons, int8_t x, int8_t y, int8_t wheel, int8_t pan)
@@ -89,6 +94,16 @@ static void display_task(void *unused)
                     if (warning_shown) {
                         warning_shown = false;
                         printf("display sleep canceled t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
+                    }
+                    if (state.app.current == JINTAI_CODEX_APP && !state.app.choosing) {
+                        if (state.app.codex_detail) {
+                            state.codex_detail = &display_codex.detail;
+                            state.codex_last_contact_ms = codex_uart_read(NULL, &display_codex.detail);
+                        } else {
+                            state.codex = &display_codex.list;
+                            state.codex_last_contact_ms = codex_uart_read(&display_codex.list, NULL);
+                        }
+                        state.codex_now_ms = esp_timer_get_time() / 1000;
                     }
                     status = lab_display_update(&state);
                 }
@@ -180,6 +195,8 @@ void app_main(void)
 
     esp_err_t usb_status = usb_mouse_init();
     if (usb_status != ESP_OK) printf("USB mouse init failed: %s\n", esp_err_to_name(usb_status));
+    esp_err_t codex_status = codex_uart_init();
+    if (codex_status != ESP_OK) printf("Codex serial init failed: %s\n", esp_err_to_name(codex_status));
 
     app_manager_t apps;
     app_manager_init(&apps);
@@ -247,6 +264,11 @@ void app_main(void)
             /* Touch only wakes and keeps the display awake in the mouse app. */
             if (apps.view.current == 1 && touch.ready && touch.reported) activity = true;
             int64_t now = esp_timer_get_time();
+            codex_summary_t codex = {0};
+            if (apps.view.current == JINTAI_CODEX_APP) {
+                codex_uart_summary(&codex, apps.view.codex_detail ? apps.view.codex_id : NULL, now / 1000);
+                if (codex.active) activity = true;
+            }
             if (activity) last_activity = now;
             state.awake = now - last_activity < SCREEN_IDLE_US;
             state.sleep_warning = state.awake && now - last_activity >= SCREEN_IDLE_US - SCREEN_WARNING_US;
@@ -260,6 +282,7 @@ void app_main(void)
                     .touch_available = touch_init == ESP_OK,
                     .touch_ready = touch.ready,
                     .touch_count = touch.reported,
+                    .codex = &codex,
                 };
                 for (unsigned i = 0; i < 4; ++i) input.buttons[i] = state.buttons[i];
                 app_view_t previous_app = apps.view;
@@ -312,6 +335,8 @@ void app_main(void)
                     previous_count = previous_valid = 255;
                 }
             }
+            bool showing_detail = apps.view.current == JINTAI_CODEX_APP && !apps.view.choosing && apps.view.codex_detail;
+            codex_uart_request(showing_detail ? apps.view.codex_id : NULL, apps.view.codex_page, now / 1000);
             state.app = apps.view;
             if (display_queue) xQueueOverwrite(display_queue, &state);
         }

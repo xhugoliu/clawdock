@@ -5,6 +5,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let serial = SerialConnection()
     private let mouse = MouseBridge()
+    private let codex = CodexBridge()
     private var modules: [BridgeModule] = []
     private var timer: Timer?
     private var devices: [SerialDevice] = []
@@ -13,8 +14,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var selectedPath: String? { UserDefaults.standard.string(forKey: "serialPath") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        modules = [mouse]
+        modules = [mouse, codex]
         mouse.enabled = UserDefaults.standard.object(forKey: "mouseEnabled") as? Bool ?? true
+        codex.enabled = UserDefaults.standard.object(forKey: "codexEnabled") as? Bool ?? true
+        codex.send = { [weak self] in self?.serial.sendLatest($0) }
         serial.onLine = { [weak self] line in self?.modules.forEach { $0.receive(line: line) } }
         serial.onDisconnect = { [weak self] in
             guard let self else { return }
@@ -34,7 +37,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         permission = AXIsProcessTrusted()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
-        if !permission { requestPermission() }
+        if mouse.enabled && !permission { requestPermission() }
     }
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
@@ -94,6 +97,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mouseItem.target = self
         mouseItem.state = mouse.enabled ? .on : .off
         menu.addItem(mouseItem)
+        let codexItem = NSMenuItem(title: "启用 Codex 会话监看", action: #selector(toggleCodex), keyEquivalent: "")
+        codexItem.target = self
+        codexItem.state = codex.enabled ? .on : .off
+        menu.addItem(codexItem)
         let permissionItem = NSMenuItem(title: permission ? "辅助功能权限：已授权" : "辅助功能权限：点击授权…",
                                         action: permission ? nil : #selector(openPermissionSettings), keyEquivalent: "")
         permissionItem.target = self
@@ -120,6 +127,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quit = NSMenuItem(title: "退出近台", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
+    }
+    @objc private func toggleCodex() {
+        codex.enabled.toggle()
+        codex.reset()
+        UserDefaults.standard.set(codex.enabled, forKey: "codexEnabled")
     }
     @objc private func toggleMouse() {
         mouse.enabled.toggle()

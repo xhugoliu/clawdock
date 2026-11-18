@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "app_runtime.h"
+#include "codex_monitor.h"
 
 typedef struct {
     bool buttons[4];
@@ -12,6 +13,7 @@ typedef struct {
     bool touch_available;
     bool touch_ready;
     unsigned touch_count;
+    const codex_summary_t *codex;
 } app_input_t;
 
 typedef struct {
@@ -20,6 +22,11 @@ typedef struct {
     bool choosing;
     unsigned presses;
     bool mouse_scroll;
+    unsigned codex_row;
+    uint8_t codex_id[CODEX_ID_BYTES];
+    bool codex_has_selection;
+    bool codex_detail;
+    unsigned codex_page;
 } app_view_t;
 
 typedef struct {

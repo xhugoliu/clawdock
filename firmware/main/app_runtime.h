@@ -3,6 +3,7 @@
 #include "mouse.h"
 
 #define JINTAI_APP_COUNT 4
+#define JINTAI_CODEX_APP 2
 
 typedef struct {
     unsigned presses;

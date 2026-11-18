@@ -40,6 +40,14 @@ void app_manager_wake(app_manager_t *manager)
 
 static void deliver_button(app_manager_t *m, unsigned button, bool pressed)
 {
+    if (m->view.current == JINTAI_CODEX_APP && pressed) {
+        if (button == 1 && m->view.codex_has_selection && !m->view.codex_detail) {
+            m->view.codex_detail = true;
+            m->view.codex_page = 0;
+        } else if (button == 2) {
+            m->view.codex_detail = false;
+        }
+    }
     app_button(&m->runtime, m->view.current, button, pressed);
     m->view.presses = m->runtime.presses;
     m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
@@ -78,25 +86,61 @@ static void select_current(app_manager_t *m)
         app_start(&m->runtime, m->view.current);
         m->view.presses = m->runtime.presses;
         m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
+        m->view.codex_row = 0;
+        memset(m->view.codex_id, 0, sizeof(m->view.codex_id));
+        m->view.codex_has_selection = false;
+        m->view.codex_detail = false;
+        m->view.codex_page = 0;
     }
     m->view.choosing = false;
     block_input(m);
 }
 
-static void navigate(app_manager_t *m, const app_input_t *in)
+static int navigation_step(app_manager_t *m, const app_input_t *in)
 {
-    if (!in->joystick_ready) return;
+    if (!in->joystick_ready) return 0;
     int y = in->joystick_y;
     if (y > -NAV_RELEASE && y < NAV_RELEASE) m->navigation_armed = true;
-    if (!m->navigation_armed) return;
-    /* Diagnostic screen maps positive Y to up. The list wraps at both ends. */
-    if (y >= NAV_THRESHOLD) {
-        m->view.selected = (m->view.selected + JINTAI_APP_COUNT - 1) % JINTAI_APP_COUNT;
-        m->navigation_armed = false;
-    } else if (y <= -NAV_THRESHOLD) {
-        m->view.selected = (m->view.selected + 1) % JINTAI_APP_COUNT;
-        m->navigation_armed = false;
+    if (!m->navigation_armed || (y > -NAV_THRESHOLD && y < NAV_THRESHOLD)) return 0;
+    m->navigation_armed = false;
+    return y > 0 ? -1 : 1;
+}
+
+static void navigate(app_manager_t *m, const app_input_t *in)
+{
+    int step = navigation_step(m, in);
+    m->view.selected = (m->view.selected + JINTAI_APP_COUNT + step) % JINTAI_APP_COUNT;
+}
+
+static void navigate_codex(app_manager_t *m, const app_input_t *in)
+{
+    const codex_summary_t *list = in->codex;
+    int step = navigation_step(m, in);
+    if (m->view.codex_detail) {
+        if (!list || !list->detail_pages) return;
+        unsigned page = m->view.codex_page < list->detail_pages ? m->view.codex_page : list->detail_pages - 1;
+        if (step < 0 && page > 0) --page;
+        if (step > 0 && page + 1 < list->detail_pages) ++page;
+        m->view.codex_page = page;
+        return;
     }
+    if (!list || !list->count) {
+        m->view.codex_row = 0;
+        memset(m->view.codex_id, 0, sizeof(m->view.codex_id));
+        m->view.codex_has_selection = false;
+        return;
+    }
+    unsigned row = m->view.codex_row < list->count ? m->view.codex_row : list->count - 1;
+    for (unsigned i = 0; i < list->count; ++i) {
+        if (memcmp(m->view.codex_id, list->ids[i], CODEX_ID_BYTES) != 0) continue;
+        row = i;
+        break;
+    }
+    if (step < 0 && row > 0) --row;
+    if (step > 0 && row + 1 < list->count) ++row;
+    m->view.codex_row = row;
+    memcpy(m->view.codex_id, list->ids[row], CODEX_ID_BYTES);
+    m->view.codex_has_selection = true;
 }
 
 void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
@@ -176,4 +220,5 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
     }
     if (m->chord_pending && switches_released(in)) flush_pending(m);
     if (m->chord_locked && switches_released(in)) m->chord_locked = false;
+    if (m->view.current == JINTAI_CODEX_APP && !m->chord_pending) navigate_codex(m, in);
 }

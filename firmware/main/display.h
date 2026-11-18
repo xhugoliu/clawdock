@@ -16,6 +16,10 @@ typedef struct {
     bool sleep_warning;
     lab_touch_state_t touch;
     app_view_t app;
+    const codex_snapshot_t *codex;
+    const codex_detail_t *codex_detail;
+    int64_t codex_now_ms;
+    int64_t codex_last_contact_ms;
 } lab_display_state_t;
 
 esp_err_t lab_display_init(void);
