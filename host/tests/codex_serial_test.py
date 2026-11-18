@@ -264,9 +264,13 @@ def mixed_sessions():
             ids = {codex, open_code, claude, pi}
             rows = eventually(master, lambda rows: set(rows) == ids)
             assert all(row[0] == 1 for row in rows.values())
-            assert len({bytes(row[1]) for row in rows.values()}) == 4, 'Agent names must distinguish equal titles'
+            assert len({bytes(row[1]) for row in rows.values()}) == 1, 'Equal titles must render without Agent prefixes'
             assert any(rows[open_code][2]) and not any(rows[pi][2])
-            assert any(detail(master, open_code, 0)[2])
+            kind, payload = request(master, f'JT_CODEX 4 {open_code} 0')
+            assert kind == 2 and payload[:16] == open_code.bytes and payload[16:18] == b'\0\1'
+            detail_title, offset = bitmap(payload, 19, 32)
+            assert detail_title == rows[open_code][1], 'Detail and list must render the same title'
+            assert any(bitmap(payload, offset, 320)[0])
 
             now_ms = int(time.time() * 1000)
             info['time'] = {'busy': started, 'updated': now_ms, 'idle': now_ms}

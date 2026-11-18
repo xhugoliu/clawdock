@@ -138,8 +138,7 @@ static void navigate_codex(app_manager_t *m, const app_input_t *in)
         row = i;
         break;
     }
-    if (step < 0 && row > 0) --row;
-    if (step > 0 && row + 1 < list->count) ++row;
+    row = (row + list->count + step) % list->count;
     m->view.codex_row = row;
     memcpy(m->view.codex_id, list->ids[row], CODEX_ID_BYTES);
     m->view.codex_has_selection = true;

@@ -86,7 +86,8 @@ int main(void)
     sessions.count = 2;
     update(20); assert(manager.view.codex_row == 0 && manager.view.codex_id[0] == 2);
     move(-800); assert(manager.view.codex_row == 1 && manager.view.codex_id[0] == 3);
-    move(-800); assert(manager.view.codex_row == 1); /* End of list. */
+    move(-800); assert(manager.view.codex_row == 0 && manager.view.codex_id[0] == 2); /* Wrap down. */
+    move(800); assert(manager.view.codex_row == 1 && manager.view.codex_id[0] == 3); /* Wrap up. */
 
     tap_sw(1);
     assert(manager.view.codex_detail && manager.view.codex_page == 0 && manager.view.codex_id[0] == 3);
@@ -139,6 +140,10 @@ int main(void)
 
     open_selector(); move(800); release_chord(); update(20); update(20);
     assert(manager.view.current == JINTAI_CODEX_APP && manager.view.codex_id[0] == 2);
+    sessions.count = 1;
+    move(-800);
+    move(800);
+    assert(manager.view.codex_row == 0 && manager.view.codex_id[0] == 2);
     sessions.count = 0;
     update(20); assert(manager.view.codex_row == 0 && manager.view.codex_id[0] == 0);
     tap_sw(1); assert(!manager.view.codex_detail);

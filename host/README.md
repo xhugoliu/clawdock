@@ -18,7 +18,7 @@ host/start-mouse-bridge.sh
 
 ## 会话监看
 
-在设备选中 `SESSIONS`。近台合并 Codex、OpenCode、Claude Code 和 Pi 的本机会话，标题注明来源。运行中的会话优先，近台观察到的已结束轮次保留 60 秒。Mac 把标题和最近一条可见回复渲染为位图，详情最多显示约 2400 字符。会话监看无需辅助功能授权。
+在设备选中 `SESSIONS`。近台合并 Codex、OpenCode、Claude Code 和 Pi 的本机会话，使用会话原有标题。运行中的会话优先，近台观察到的已结束轮次保留 60 秒。Mac 把标题和最近一条可见回复渲染为位图，详情最多显示约 2400 字符。会话监看无需辅助功能授权。
 
 - **Codex** 自动读取 `~/.codex/sessions` 和 `session_index.jsonl`，也支持启动环境中的 `CODEX_HOME`。标题索引缺失时显示项目目录名。运行记录超过 10 分钟没有新状态信号会退出列表。
 - **OpenCode 2.x** 自动发现 `~/.local/state/opencode/service.json` 注册的本机服务，也支持启动环境中的 `XDG_STATE_HOME`。通过服务的只读会话 API 获取状态和回复。默认共享服务内的会话可以显示。以 `--standalone` 启动的独立服务超出这一发现范围。 [OpenCode API](https://opencode.ai/docs/api)

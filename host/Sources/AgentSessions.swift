@@ -22,7 +22,8 @@ struct AgentSession {
     var reply: String?
 
     var displayTitle: String {
-        title.isEmpty || title == source.rawValue ? source.rawValue : "\(source.rawValue) · \(title)"
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? source.rawValue : name
     }
 
     static func id(for source: AgentSource, nativeID: String) -> UUID {

@@ -244,17 +244,37 @@ static void codex_bitmap(int x, int y, const uint8_t *bitmap, unsigned height, u
                 pixel(x + (int)col, y + (int)row, color);
 }
 
-static void codex_status(int right, int baseline, uint8_t status)
+static void status_stroke(int x, int y, int dx, int dy, int length, uint16_t color)
 {
-    const char *label;
+    for (int i = 0; i < length; ++i) rect(x + i * dx, y + i * dy, 2, 2, color);
+}
+
+static void status_spinner(int x, int y, int64_t now_ms)
+{
+    /* Dot masks for ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏. */
+    static const uint8_t frames[] = {0x0b, 0x19, 0x39, 0x38, 0x3c, 0x34, 0x26, 0x27, 0x07, 0x0f};
+    static const uint8_t dots[][2] = {{0x01, 0x08}, {0x02, 0x10}, {0x04, 0x20}, {0x40, 0x80}};
+    uint8_t frame = frames[(now_ms / 120) % sizeof(frames)];
+    for (int row = 0; row < 4; ++row)
+        for (int column = 0; column < 2; ++column)
+            if (frame & dots[row][column]) rect(x - 4 + column * 6, y - 8 + row * 5, 3, 3, UI_SESSION_RUNNING);
+}
+
+static void codex_status(int right, int baseline, uint8_t status, int64_t now_ms)
+{
+    int x = right - 9, y = baseline - 9;
     switch (status) {
-        case CODEX_RUNNING: label = "Running"; break;
-        case CODEX_COMPLETED: label = "Done"; break;
-        case CODEX_FAILED: label = "Failed"; break;
-        default: label = "Cancelled"; break;
+        case CODEX_RUNNING: status_spinner(x, y, now_ms); break;
+        case CODEX_COMPLETED:
+            status_stroke(x - 7, y, 1, 1, 5, UI_SESSION_DONE);
+            status_stroke(x - 3, y + 4, 1, -1, 11, UI_SESSION_DONE);
+            break;
+        case CODEX_FAILED:
+            status_stroke(x - 6, y - 6, 1, 1, 13, UI_SESSION_FAILED);
+            status_stroke(x - 6, y + 6, 1, -1, 13, UI_SESSION_FAILED);
+            break;
+        default: status_stroke(x - 5, y, 1, 0, 11, UI_SECONDARY); break;
     }
-    text_end(right, baseline, label, UI_FONT_HINT,
-             status == CODEX_RUNNING || status == CODEX_FAILED ? UI_TEXT : UI_SECONDARY);
 }
 
 static const char *codex_link_status(const lab_display_state_t *state)
@@ -281,7 +301,7 @@ static void draw_codex_detail(const lab_display_state_t *state)
     }
 
     codex_bitmap(UI_LEFT_MARGIN, 5, detail->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
-    codex_status(WIDTH, UI_TITLE_BASELINE, detail->session.state);
+    codex_status(WIDTH, UI_TITLE_BASELINE, detail->session.state, state->codex_now_ms);
 
     char page[24];
     snprintf(page, sizeof(page), "Page %u / %u", state->app.codex_page + 1, detail->pages);
@@ -318,17 +338,12 @@ static void draw_codex(const lab_display_state_t *state)
         return;
     }
 
-    unsigned active = 0;
     unsigned focus = state->app.codex_row < snapshot->count ? state->app.codex_row : snapshot->count - 1;
-    for (unsigned i = 0; i < snapshot->count; ++i) {
-        active += snapshot->rows[i].session.state == CODEX_RUNNING;
+    for (unsigned i = 0; i < snapshot->count; ++i)
         if (memcmp(state->app.codex_id, snapshot->rows[i].id, CODEX_ID_BYTES) == 0) focus = i;
-    }
     char label[24];
-    snprintf(label, sizeof(label), "%u running", active);
-    text_end(WIDTH, UI_TITLE_BASELINE, label, UI_FONT_BODY, UI_TEXT);
-    snprintf(label, sizeof(label), "%u / %u", focus + 1, snapshot->count);
-    text_end(WIDTH, 52, label, UI_FONT_HINT, UI_SECONDARY);
+    snprintf(label, sizeof(label), "%u/%u", focus + 1, snapshot->count);
+    text_end(WIDTH, UI_TITLE_BASELINE, label, UI_FONT_HINT, UI_SECONDARY);
 
     unsigned first = focus >= VISIBLE_ROWS ? focus - (VISIBLE_ROWS - 1) : 0;
     for (unsigned i = first; i < snapshot->count && i < first + VISIBLE_ROWS; ++i) {
@@ -337,7 +352,7 @@ static void draw_codex(const lab_display_state_t *state)
         int title_y = y + (ROW_HEIGHT - CODEX_TITLE_HEIGHT - CODEX_PREVIEW_HEIGHT - UI_SPACE) / 2;
         list_row(y, ROW_HEIGHT, focus == i);
         codex_bitmap(CONTENT_X, title_y, row->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
-        codex_status(WIDTH - UI_INSET, title_y + 25, row->session.state);
+        codex_status(WIDTH - UI_INSET, title_y + 25, row->session.state, state->codex_now_ms);
         if (row->has_preview)
             codex_bitmap(CONTENT_X, title_y + CODEX_TITLE_HEIGHT + UI_SPACE, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
     }
