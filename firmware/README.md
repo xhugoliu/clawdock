@@ -41,7 +41,7 @@ cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/app_manager_tes
 host/start-mouse-bridge.sh
 ```
 
-首次运行会编译本地桥接程序；如有多个串口，可将设备路径作为参数，例如 `host/start-mouse-bridge.sh /dev/cu.usbmodem5CF71530561`。桥接程序在后台运行，日志位于 `/tmp/jintai-mouse-bridge.log`；若 macOS 请求辅助功能权限，请在系统设置中允许 `Jintai Mouse` 或启动它的终端程序。桥接程序需要保持运行，设备重启后需重新选择 `MOUSE`；停止程序可在活动监视器中结束 `JintaiMouse`。串口被桥接程序占用时不能同时用于烧录或其他串口监视器。自动测试可先运行 `host/build-mouse-bridge.sh`，然后运行 `python3 host/tests/serial_bridge_test.py`。
+首次运行会编译并启动菜单栏应用 `host/Jintai.app`；以后可在 Finder 中双击启动。点击屏幕右上角的近台图标，可查看连接和辅助功能权限、启停鼠标桥接、选择串口或退出。多个兼容串口同时连接时，需要在菜单中选择；设备重新连接后应用会尝试连接上次选中的串口。需要在 macOS 辅助功能设置中允许“近台”。设备重启后仍需重新选择 `MOUSE`。应用占用串口时不能同时烧录或使用其他串口监视器；退出应用后即可使用。构建、权限及测试说明见 [Mac 应用说明](../host/README.md)。
 
 2026-11-17 已在当前 Mac 和 USB-UART 连接上实测光标、左右键、滚轮及浏览器返回/前进，详见[实验记录](../experiments/2026-11-17-usb-mouse.md)。
 

@@ -5,14 +5,16 @@ import subprocess
 import time
 from pathlib import Path
 
-app = Path(__file__).resolve().parents[1] / 'JintaiMouse.app/Contents/MacOS/JintaiMouse'
+app = Path(__file__).resolve().parents[1] / 'Jintai.app/Contents/MacOS/Jintai'
 master, slave = pty.openpty()
 env = dict(os.environ, JINTAI_MOUSE_DEBUG='1', JINTAI_MOUSE_TEST_NO_POST='1')
-proc = subprocess.Popen([str(app), os.ttyname(slave)], stdout=subprocess.PIPE,
+proc = subprocess.Popen([str(app), '--test-serial', os.ttyname(slave)], stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, env=env)
 try:
     time.sleep(0.5)
-    os.write(master, b'JT_MOUSE 0 0 0 0 0\r\nJT_MOUSE 1 0 0 0 0\r\nJT_MOUSE 0 0 0 0 0\r\nJT_MOUSE 1 0 0 0 0\r\nJT_MOUSE 0 0 0 0 0\r\n' + b'JT_SCROLL 1000 1000\r\n' * 10 + b'JT_SCROLL -1000 -1000\r\nJT_TOUCH_SCROLL -5 7\r\n')
+    os.write(master, b'JT_MOUSE 0 0')
+    time.sleep(0.05)
+    os.write(master, b' 0 0 0\r\nJT_MOUSE 1 0 0 0 0\r\nJT_MOUSE 0 0 0 0 0\r\nJT_MOUSE 1 0 0 0 0\r\nJT_MOUSE 0 0 0 0 0\r\n' + b'JT_SCROLL 1000 1000\r\n' * 10 + b'JT_SCROLL -1000 -1000\r\nJT_TOUCH_SCROLL -5 7\r\n')
     time.sleep(0.5)
     os.set_blocking(proc.stdout.fileno(), False)
     output = proc.stdout.read().decode()
@@ -21,9 +23,13 @@ try:
     assert output.count('scroll [-12, 12]') == 10, output
     assert 'scroll [12, -12]' in output, output
     assert 'touch scroll [-5, 7]' in output, output
+    os.close(master)
+    master = -1
+    assert proc.wait(timeout=3) == 0, 'bridge did not handle disconnect'
     print('serial bridge test passed')
 finally:
-    proc.terminate()
-    proc.wait(timeout=3)
-    os.close(master)
+    if proc.poll() is None:
+        proc.terminate()
+        proc.wait(timeout=3)
+    if master >= 0: os.close(master)
     os.close(slave)
