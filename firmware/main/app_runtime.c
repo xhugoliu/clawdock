@@ -23,7 +23,7 @@ static void placeholder_button(app_runtime_t *runtime, unsigned button, bool pre
 static const app_definition_t apps[JINTAI_APP_COUNT] = {
     { .name = "INPUT LAB", .title = "Input Lab" },
     { .name = "MOUSE", .title = "Mouse", .button = mouse_app_button },
-    [JINTAI_CODEX_APP] = { .name = "CODEX", .title = "Codex" },
+    [JINTAI_CODEX_APP] = { .name = "SESSIONS", .title = "Sessions" },
     { .name = "APP THREE", .title = "App Three", .button = placeholder_button },
 };
 

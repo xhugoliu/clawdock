@@ -2,7 +2,7 @@ import CoreGraphics
 import CoreText
 import Foundation
 
-final class CodexBridge: BridgeModule {
+final class SessionBridge: BridgeModule {
     private enum Request: Equatable {
         case list
         case detail(UUID, UInt8)
@@ -16,14 +16,18 @@ final class CodexBridge: BridgeModule {
         }
     }
 
-    private let queue = DispatchQueue(label: "com.jintai.codex-monitor", qos: .utility)
-    private let sessions = CodexSessions()
-    private let encoder = CodexFrameEncoder()
+    private let queue = DispatchQueue(label: "com.jintai.session-monitor", qos: .utility)
+    private let sessions: AgentSessions
+    private let encoder = SessionFrameEncoder()
     private var generation = 0
     private var busy = false
     private var pending: Request?
     var enabled = true
     var send: ((Data) -> Void)?
+
+    init(codexOnly: Bool = false) {
+        sessions = AgentSessions(queue: queue, codexOnly: codexOnly)
+    }
 
     func receive(line: String) {
         guard enabled, let request = Request(line) else { return }
@@ -63,7 +67,7 @@ final class CodexBridge: BridgeModule {
 }
 
 /// JCX4 carries a list or one detail page. Monochrome bitmaps use zero runs and literal runs.
-private final class CodexFrameEncoder {
+private final class SessionFrameEncoder {
     private let width = 544
     // Reserve the right side of the title row for the board's status label.
     private let titleWidth = 428
@@ -78,9 +82,9 @@ private final class CodexFrameEncoder {
     private var detailText: String?
     private var pages: [Data] = []
 
-    func list(_ sessions: [CodexSession]?) -> Data {
-        let rows = Array((sessions ?? []).prefix(CodexSessions.limit))
-        let usedTitles = Set(rows.map(\.title))
+    func list(_ sessions: [AgentSession]?) -> Data {
+        let rows = Array((sessions ?? []).prefix(AgentSessions.limit))
+        let usedTitles = Set(rows.map(\.displayTitle))
         let usedPreviews = Set(rows.compactMap(\.reply))
         titles = titles.filter { usedTitles.contains($0.key) }
         previews = previews.filter { usedPreviews.contains($0.key) }
@@ -100,7 +104,7 @@ private final class CodexFrameEncoder {
         return frame(kind: 1, payload: payload)
     }
 
-    func detail(_ session: CodexSession?, id: UUID, requested: UInt8) -> Data {
+    func detail(_ session: AgentSession?, id: UUID, requested: UInt8) -> Data {
         var payload = Data()
         appendID(id, to: &payload)
         guard let session else {
@@ -123,11 +127,12 @@ private final class CodexFrameEncoder {
         withUnsafeBytes(of: &uuid) { output.append(contentsOf: $0) }
     }
 
-    private func appendSession(_ row: CodexSession, to output: inout Data) {
+    private func appendSession(_ row: AgentSession, to output: inout Data) {
         output.append(row.state.rawValue)
-        let pixels = titles[row.title] ?? lineBitmap(row.title, font: titleFont,
-                                                    height: titleHeight, fitWithin: titleWidth)
-        titles[row.title] = pixels
+        let title = row.displayTitle
+        let pixels = titles[title] ?? lineBitmap(title, font: titleFont,
+                                                height: titleHeight, fitWithin: titleWidth)
+        titles[title] = pixels
         appendBitmap(pixels, to: &output)
     }
 
@@ -145,7 +150,7 @@ private final class CodexFrameEncoder {
 
     private func lineBitmap(_ text: String, font: CTFont, height: Int, fitWithin lineWidth: Int) -> Data {
         let clean = text.prefix(200).split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        let line = CTLineCreateWithAttributedString(attributed(clean.isEmpty ? "Codex" : clean, font: font))
+        let line = CTLineCreateWithAttributedString(attributed(clean, font: font))
         let ellipsis = CTLineCreateWithAttributedString(attributed("…", font: font))
         let fitted = CTLineCreateTruncatedLine(line, Double(lineWidth - 4), .end, ellipsis) ?? line
         return bitmap(height) { context in

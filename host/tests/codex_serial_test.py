@@ -1,5 +1,6 @@
-"""Exercise the production Codex log reader and frame writer through a pseudoterminal."""
+"""Exercise the production session sources and frame writer through a pseudoterminal."""
 import datetime as dt
+import hashlib
 import json
 import os
 import pty
@@ -7,10 +8,13 @@ import select
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 import zlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 app = Path(__file__).resolve().parents[1] / 'Jintai.app/Contents/MacOS/Jintai'
@@ -177,4 +181,114 @@ with tempfile.TemporaryDirectory() as temp:
             os.close(master)
         os.close(slave)
 
-print('Codex serial tests passed')
+def session_id(source, native_id):
+    digest = bytearray(hashlib.sha256(f'com.jintai.session:{source}:{native_id}'.encode()).digest()[:16])
+    digest[6] = (digest[6] & 0x0f) | 0x80
+    digest[8] = (digest[8] & 0x3f) | 0x80
+    return uuid.UUID(bytes=bytes(digest))
+
+
+def eventually(master, matches):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        rows = poll(master)
+        if matches(rows):
+            return rows
+        time.sleep(0.15)
+    raise AssertionError(f'unexpected session states: {[value[0] for value in rows.values()]}')
+
+
+def mixed_sessions():
+    started = int(time.time() * 1000) - 3000
+    main_id, child_id = 'ses_main', 'ses_child'
+    active = {main_id: {'type': 'running'}, child_id: {'type': 'running'}}
+    info = {'id': main_id, 'title': 'Shared title', 'time': {'busy': started, 'updated': started}}
+    child = {'id': child_id, 'parentID': main_id, 'time': {'busy': started, 'updated': started}}
+    prior = {'id': 'ses_prior', 'outcome': 'succeeded',
+             'time': {'busy': started - 100, 'updated': started, 'idle': started}}
+
+    class OpenCodeServer(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_GET(self):
+            assert self.headers.get('Authorization') == 'Basic b3BlbmNvZGU6Zml4dHVyZQ=='
+            path = urlsplit(self.path).path
+            if path == '/api/session/active':
+                data = dict(active)
+            elif path == '/api/session':
+                data = [child, prior] + ([info] if main_id not in active else [])
+            elif path == f'/api/session/{main_id}':
+                data = info
+            elif path == f'/api/session/{main_id}/message':
+                data = [{'type': 'assistant', 'time': {'created': started + 1},
+                         'content': [{'type': 'reasoning', 'text': 'hidden'}, {'type': 'text', 'text': 'Latest reply'}]}]
+            else:
+                self.send_error(404)
+                return
+            body = json.dumps({'data': data}).encode()
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    with tempfile.TemporaryDirectory() as temp, ThreadingHTTPServer(('127.0.0.1', 0), OpenCodeServer) as http:
+        home = Path(temp)
+        registration = home / 'opencode/service.json'
+        registration.parent.mkdir()
+        registration.write_text(json.dumps({'url': f'http://127.0.0.1:{http.server_port}', 'password': 'fixture'}))
+        events_dir = home / 'events'
+        codex = uuid.uuid4()
+        native = str(uuid.uuid4())
+        codex_dir = home / 'sessions'
+        codex_dir.mkdir()
+        (home / 'session_index.jsonl').write_text(json.dumps({'id': str(codex), 'thread_name': 'Shared title'}) + '\n')
+        fixture(codex_dir, codex, event('task_started', 'c', 1))
+        transcript = home / f'{native}.jsonl'
+        for folder in ('claude', 'pi'):
+            path = events_dir / folder / 'event.json'
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({'id': native, 'state': 'running', 'title': 'Shared title',
+                                        'startedAt': started, 'updatedAt': started, 'transcript': str(transcript)}))
+
+        server_thread = threading.Thread(target=http.serve_forever, daemon=True)
+        server_thread.start()
+        master, slave = pty.openpty()
+        proc = subprocess.Popen([str(app), '--test-session-serial', os.ttyname(slave)], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, env=dict(os.environ, CODEX_HOME=temp, XDG_STATE_HOME=temp,
+                                                                  JINTAI_SESSION_EVENTS_DIR=str(events_dir)))
+        try:
+            assert '测试串口已连接' in proc.stdout.readline().decode()
+            open_code, claude, pi = (session_id('OpenCode', main_id), session_id('Claude Code', native),
+                                     session_id('Pi', native))
+            ids = {codex, open_code, claude, pi}
+            rows = eventually(master, lambda rows: set(rows) == ids)
+            assert all(row[0] == 1 for row in rows.values())
+            assert len({bytes(row[1]) for row in rows.values()}) == 4, 'Agent names must distinguish equal titles'
+            assert any(rows[open_code][2]) and not any(rows[pi][2])
+            assert any(detail(master, open_code, 0)[2])
+
+            now_ms = int(time.time() * 1000)
+            info['time'] = {'busy': started, 'updated': now_ms, 'idle': now_ms}
+            info['outcome'] = 'succeeded'
+            active.pop(main_id)
+            interruption = {'type': 'user', 'sessionId': native,
+                            'timestamp': dt.datetime.now(dt.timezone.utc).isoformat(),
+                            'message': {'role': 'user', 'content': '[Request interrupted by user]'}}
+            transcript.write_text(json.dumps(interruption) + '\n')
+            mixed = eventually(master, lambda rows: rows.get(open_code, (0,))[0] == 2 and rows.get(claude, (0,))[0] == 4)
+            assert set(mixed) == ids and list(mixed) == list(rows), 'Terminal updates must preserve the selected row'
+
+            registration.unlink()
+            eventually(master, lambda rows: set(rows) == ids - {open_code})
+        finally:
+            proc.terminate()
+            proc.wait(timeout=3)
+            os.close(master)
+            os.close(slave)
+            http.shutdown()
+            server_thread.join(timeout=3)
+
+
+mixed_sessions()
+print('Session serial tests passed')

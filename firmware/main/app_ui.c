@@ -309,7 +309,7 @@ static void draw_codex(const lab_display_state_t *state)
     if (!empty) {
         if (!snapshot || !snapshot->received_ms || state->codex_now_ms - snapshot->received_ms > CODEX_TIMEOUT_MS)
             empty = "Loading sessions";
-        else if (!snapshot->available) empty = "Codex logs unavailable";
+        else if (!snapshot->available) empty = "Session sources unavailable";
         else if (!snapshot->count) empty = "No active sessions";
     }
     if (empty) {

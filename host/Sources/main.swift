@@ -1,15 +1,16 @@
 import Foundation
 import AppKit
 
-if let index = CommandLine.arguments.firstIndex(of: "--test-codex-serial"), index + 1 < CommandLine.arguments.count {
+if let index = CommandLine.arguments.firstIndex(where: { $0 == "--test-codex-serial" || $0 == "--test-session-serial" }),
+   index + 1 < CommandLine.arguments.count {
     let serial = SerialConnection()
-    let codex = CodexBridge()
-    codex.send = { frame in
-        print("Codex TX bytes=\(frame.count)"); fflush(stdout)
+    let sessions = SessionBridge(codexOnly: CommandLine.arguments[index] == "--test-codex-serial")
+    sessions.send = { frame in
+        print("Sessions TX bytes=\(frame.count)"); fflush(stdout)
         serial.sendLatest(frame)
     }
-    serial.onLine = { line in print(line); fflush(stdout); codex.receive(line: line) }
-    serial.onDisconnect = { codex.reset(); exit(0) }
+    serial.onLine = { line in print(line); fflush(stdout); sessions.receive(line: line) }
+    serial.onDisconnect = { sessions.reset(); exit(0) }
     do {
         try serial.connect(CommandLine.arguments[index + 1])
         print("测试串口已连接"); fflush(stdout)

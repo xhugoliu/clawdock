@@ -1,25 +1,10 @@
 import Foundation
 
-enum CodexSessionState: UInt8 {
-    case running = 1, completed, failed, cancelled
-}
-
-struct CodexSession {
-    let id: UUID
-    let title: String
-    let state: CodexSessionState
-    let updatedAt: Date
-    let reply: String?
-}
-
 /// Reads only local rollout and title files. All access happens on the monitor queue.
 final class CodexSessions {
-    static let limit = 6
-    private static let activeFor: TimeInterval = 600
-    private static let retainFor: TimeInterval = 60
     private static let tailBytes = 1024 * 1024
     private static let startEvents: Set<String> = ["task_started", "turn_started"]
-    private static let endStates: [String: CodexSessionState] = [
+    private static let endStates: [String: AgentSessionState] = [
         "task_complete": .completed, "turn_completed": .completed,
         "task_failed": .failed, "turn_failed": .failed,
         "turn_aborted": .cancelled, "turn_cancelled": .cancelled
@@ -35,7 +20,7 @@ final class CodexSessions {
         var turn: String?
         var startedAt = Date.distantPast
         var updatedAt = Date.distantPast
-        var state: CodexSessionState?
+        var state: AgentSessionState?
         var modified = Date.distantPast
         var reply: String?
     }
@@ -50,11 +35,6 @@ final class CodexSessions {
     private var titles: [UUID: String] = [:]
     private var indexModified: Date?
     private var nextDiscovery = Date.distantPast
-    private var observedSince: Date?
-    private var visible: [UUID] = []
-    private var shownRunning: Set<UUID> = []
-    private var retained: [UUID: Date] = [:]
-    private(set) var recent: [UUID: CodexSession] = [:]
 
     init(home: URL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"]
                         .flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
@@ -64,10 +44,8 @@ final class CodexSessions {
         fractionalTime.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     }
 
-    func snapshot(at now: Date = Date()) -> [CodexSession]? {
-        recent.removeAll(keepingCapacity: true)
+    func snapshot(at now: Date) -> [AgentSession]? {
         guard fm.isReadableFile(atPath: directory.path) else { return nil }
-        if observedSince == nil { observedSince = now }
         refreshTitles()
         let fullScan = now >= nextDiscovery
         var candidates = Set(rollouts.keys).union(ignoredRollouts.keys)
@@ -89,7 +67,7 @@ final class CodexSessions {
             }
         }
 
-        let cutoff = now.addingTimeInterval(-Self.activeFor)
+        let cutoff = now.addingTimeInterval(-AgentSessions.activeFor)
         for url in candidates {
             guard let attributes = try? fm.attributesOfItem(atPath: url.path),
                   attributes[.type] as? FileAttributeType == .typeRegular,
@@ -115,38 +93,11 @@ final class CodexSessions {
             latest[row.id] = row
         }
 
-        retained = retained.filter { $0.value > now }
-        var active: [CodexSession] = []
-        var finished: [CodexSession] = []
-        for row in latest.values {
-            guard let state = row.state else { continue }
-            let card = CodexSession(id: row.id, title: titles[row.id] ?? row.project, state: state,
-                                    updatedAt: row.updatedAt, reply: row.reply)
-            recent[row.id] = card
-            if state == .running {
-                retained[row.id] = nil
-                active.append(card)
-            } else {
-                let expires = row.updatedAt.addingTimeInterval(Self.retainFor)
-                if expires > now, shownRunning.contains(row.id) || row.startedAt >= (observedSince ?? now) {
-                    retained[row.id] = expires
-                }
-                if retained[row.id] == expires { finished.append(card) }
-            }
+        return latest.values.compactMap { row in
+            guard let state = row.state else { return nil }
+            return AgentSession(id: row.id, source: .codex, title: titles[row.id] ?? row.project,
+                                state: state, startedAt: row.startedAt, updatedAt: row.updatedAt, reply: row.reply)
         }
-
-        let ranked = (active.sorted(by: newestFirst) + finished.sorted(by: newestFirst)).prefix(Self.limit)
-        let byID = Dictionary(uniqueKeysWithValues: ranked.map { ($0.id, $0) })
-        visible = visible.filter { byID[$0] != nil }
-        let previous = Set(visible)
-        visible.append(contentsOf: ranked.map(\.id).filter { !previous.contains($0) })
-        shownRunning = Set(visible.filter { byID[$0]?.state == .running })
-        return visible.compactMap { byID[$0] }
-    }
-
-    private func newestFirst(_ left: CodexSession, _ right: CodexSession) -> Bool {
-        if left.updatedAt != right.updatedAt { return left.updatedAt > right.updatedAt }
-        return left.id.uuidString < right.id.uuidString
     }
 
     private func isRollout(_ url: URL) -> Bool {
@@ -294,12 +245,7 @@ final class CodexSessions {
     }
 
     private func replyText(_ text: String?) -> String? {
-        guard let text, !text.isEmpty else { return nil }
-        let prefix = text.prefix(2401)
-        var value = String(prefix.prefix(2400)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
-        if prefix.count > 2400 { value += "…" }
-        return value
+        AgentSession.visibleReply(text)
     }
 
     private func refreshTitles() {
