@@ -114,15 +114,12 @@ void codex_uart_summary(codex_summary_t *out, const uint8_t *detail_id, int64_t 
     xSemaphoreTake(lock, portMAX_DELAY);
     if (latest.received_ms && now_ms - latest.received_ms <= CODEX_TIMEOUT_MS) {
         out->count = latest.count;
-        for (unsigned i = 0; i < out->count; ++i) {
+        for (unsigned i = 0; i < out->count; ++i)
             memcpy(out->ids[i], latest.rows[i].id, CODEX_ID_BYTES);
-            out->active += latest.rows[i].session.state == CODEX_RUNNING;
-        }
     }
     if (detail_id && latest_detail.received_ms && now_ms - latest_detail.received_ms <= CODEX_TIMEOUT_MS &&
         memcmp(latest_detail.id, detail_id, CODEX_ID_BYTES) == 0) {
         out->detail_pages = latest_detail.pages;
-        if (!out->active && latest_detail.pages && latest_detail.session.state == CODEX_RUNNING) out->active = 1;
     }
     xSemaphoreGive(lock);
 }

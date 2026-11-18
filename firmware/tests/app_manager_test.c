@@ -149,5 +149,11 @@ int main(void)
     release_chord();
     assert(!manager.input_blocked);
     open_selector();
+    move(-800);
+    assert(manager.view.selected != manager.view.current);
+    app_manager_wake(&manager);
+    assert(!manager.view.choosing && manager.view.selected == manager.view.current);
+    release_chord();
+    assert(manager.view.current == JINTAI_CODEX_APP);
     puts("app manager tests passed");
 }

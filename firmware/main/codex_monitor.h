@@ -56,7 +56,6 @@ typedef struct {
 
 typedef struct {
     unsigned count;
-    unsigned active;
     unsigned detail_pages;
     uint8_t ids[CODEX_MAX_ROWS][CODEX_ID_BYTES];
 } codex_summary_t;

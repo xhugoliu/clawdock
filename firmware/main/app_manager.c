@@ -34,6 +34,8 @@ static void block_input(app_manager_t *m)
 void app_manager_wake(app_manager_t *manager)
 {
     if (manager->view.current == 1) mouse_release(&manager->runtime.mouse);
+    manager->view.choosing = false;
+    manager->view.selected = manager->view.current;
     manager->mouse_chord = 0;
     block_input(manager);
 }

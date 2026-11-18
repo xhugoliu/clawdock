@@ -5,6 +5,7 @@
 #include "display.h"
 #include "codex_uart.h"
 #include "joystick.h"
+#include "screen_idle.h"
 #include "touch.h"
 #include "touchpad.h"
 #include "usb_mouse.h"
@@ -23,8 +24,6 @@
 #define SAMPLE_MS 20
 #define REPORT_MS 1000
 #define DEBOUNCE_SAMPLES 3
-#define SCREEN_IDLE_US (10LL * 60 * 1000000)
-#define SCREEN_WARNING_US (5LL * 1000000)
 
 typedef struct {
     const char *name;
@@ -144,7 +143,6 @@ static bool sample_buttons(bool diagnostics)
                    (long long)(esp_timer_get_time() / 1000), b->name,
                    pressed ? "pressed" : "released");
         }
-        if (b->stable_pressed) activity = true;
     }
     return activity;
 }
@@ -203,15 +201,16 @@ void app_main(void)
     bool system_awake = true;
     lab_joystick_cal_t joystick = {0};
     touchpad_t touchpad = {0};
+    bool scroll_active = false;
     int min_x = INT32_MAX, max_x = INT32_MIN;
     int min_y = INT32_MAX, max_y = INT32_MIN;
     unsigned int errors = 0;
     int64_t report_at = esp_timer_get_time() + REPORT_MS * 1000LL;
-    int64_t last_activity = esp_timer_get_time();
+    screen_idle_t screen_idle = { .last_event_us = esp_timer_get_time() };
     TickType_t last_sample = xTaskGetTickCount();
     while (true) {
         bool diagnostics = apps.view.current == 0 && !apps.view.choosing;
-        bool activity = sample_buttons(diagnostics);
+        bool button_changed = sample_buttons(diagnostics);
         int x, y;
         esp_err_t x_result = adc_oneshot_read(adc, ADC1_GPIO21_CHANNEL, &x);
         esp_err_t y_result = adc_oneshot_read(adc, ADC1_GPIO20_CHANNEL, &y);
@@ -258,23 +257,26 @@ void app_main(void)
                 if (joystick.ready) {
                     state.normalized_x = lab_joystick_normalize(x, joystick.center_x, joystick.min_x, joystick.max_x);
                     state.normalized_y = lab_joystick_normalize(y, joystick.center_y, joystick.min_y, joystick.max_y);
-                    if (state.normalized_x != 0 || state.normalized_y != 0) activity = true;
                 }
             }
-            /* Touch only wakes and keeps the display awake in the mouse app. */
-            if (apps.view.current == 1 && touch.ready && touch.reported) activity = true;
             int64_t now = esp_timer_get_time();
-            codex_summary_t codex = {0};
-            if (apps.view.current == JINTAI_CODEX_APP) {
-                codex_uart_summary(&codex, apps.view.codex_detail ? apps.view.codex_id : NULL, now / 1000);
-                if (codex.active) activity = true;
+            screen_phase_t phase = screen_idle_update(&screen_idle, now, button_changed, state.joystick_calibrated,
+                                                      state.normalized_x, state.normalized_y, &state.touch);
+            state.awake = phase != SCREEN_ASLEEP;
+            state.sleep_warning = phase == SCREEN_WARNING;
+            if (!state.awake && system_awake && apps.view.current == 1) {
+                mouse_release(&apps.runtime.mouse);
+                output_mouse_report(0, 0, 0, 0, 0);
+                touchpad_reset(&touchpad);
+                if (scroll_active) printf("JT_SCROLL 0 0\n");
+                scroll_active = false;
             }
-            if (activity) last_activity = now;
-            state.awake = now - last_activity < SCREEN_IDLE_US;
-            state.sleep_warning = state.awake && now - last_activity >= SCREEN_IDLE_US - SCREEN_WARNING_US;
             if (state.awake && !system_awake) app_manager_wake(&apps);
             system_awake = state.awake;
             if (state.awake) {
+                codex_summary_t codex = {0};
+                if (apps.view.current == JINTAI_CODEX_APP)
+                    codex_uart_summary(&codex, apps.view.codex_detail ? apps.view.codex_id : NULL, now / 1000);
                 app_input_t input = {
                     .joystick_ready = state.adc_ok && state.joystick_calibrated,
                     .joystick_x = state.normalized_x,
@@ -321,7 +323,6 @@ void app_main(void)
                         }
                     } else touchpad_reset(&touchpad);
                     /* Send calibrated stick positions at the sampling rate for pixel scrolling. */
-                    static bool scroll_active;
                     int sx = motion_active && apps.runtime.mouse.scroll_mode ? input.joystick_x : 0;
                     int sy = motion_active && apps.runtime.mouse.scroll_mode ? input.joystick_y : 0;
                     if (sx || sy || scroll_active) printf("JT_SCROLL %d %d\n", sx, sy);
