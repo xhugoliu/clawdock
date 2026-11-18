@@ -32,16 +32,32 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
-        if let button = statusItem.button {
-            let icon = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "近台")
-            icon?.isTemplate = true
-            button.image = icon
-            if icon == nil { button.title = "近" }
-        }
+        statusItem.button?.image = Self.clawdIcon()
         permission = AXIsProcessTrusted()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
         if mouse.enabled && !permission { requestPermission() }
+    }
+    private static func clawdIcon() -> NSImage {
+        let icon = NSImage(size: NSSize(width: 20, height: 16), flipped: true) { _ in
+            let silhouette = NSBezierPath(rect: NSRect(x: 3, y: 2, width: 14, height: 9))
+            silhouette.appendRect(NSRect(x: 1, y: 6, width: 2, height: 3))
+            silhouette.appendRect(NSRect(x: 17, y: 6, width: 2, height: 3))
+            for x in [CGFloat(4), 7, 11, 14] {
+                silhouette.appendRect(NSRect(x: x, y: 11, width: 2, height: 3))
+            }
+            // Cut out the eyes so they follow the menu bar background.
+            silhouette.windingRule = .evenOdd
+            for x in [CGFloat(6), 12] {
+                silhouette.appendRect(NSRect(x: x, y: 5, width: 2, height: 3))
+            }
+            NSColor.black.setFill()
+            silhouette.fill()
+            return true
+        }
+        icon.isTemplate = true
+        icon.accessibilityDescription = "近台"
+        return icon
     }
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
