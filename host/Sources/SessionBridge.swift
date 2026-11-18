@@ -101,7 +101,7 @@ private final class SessionFrameEncoder {
                 payload.appendLE(0)
             }
         }
-        return frame(kind: 1, payload: payload)
+        return bridgeFrame(kind: 1, payload: payload)
     }
 
     func detail(_ session: AgentSession?, id: UUID, requested: UInt8) -> Data {
@@ -109,7 +109,7 @@ private final class SessionFrameEncoder {
         appendID(id, to: &payload)
         guard let session else {
             payload.append(contentsOf: [requested, 0])
-            return frame(kind: 2, payload: payload)
+            return bridgeFrame(kind: 2, payload: payload)
         }
         if detailText != session.reply || pages.isEmpty {
             detailText = session.reply
@@ -119,7 +119,7 @@ private final class SessionFrameEncoder {
         payload.append(contentsOf: [UInt8(page), UInt8(pages.count)])
         appendSession(session, to: &payload)
         appendBitmap(pages[page], to: &payload)
-        return frame(kind: 2, payload: payload)
+        return bridgeFrame(kind: 2, payload: payload)
     }
 
     private func appendID(_ id: UUID, to output: inout Data) {
@@ -219,26 +219,4 @@ private final class SessionFrameEncoder {
         return output
     }
 
-    private func frame(kind: UInt8, payload: Data) -> Data {
-        var body = Data([kind])
-        body.appendLE(UInt16(payload.count))
-        body.append(payload)
-        var crc = UInt32.max
-        for byte in body {
-            crc ^= UInt32(byte)
-            for _ in 0..<8 { crc = (crc >> 1) ^ (crc & 1 == 0 ? 0 : 0xedb88320) }
-        }
-        var frame = Data("JCX4".utf8)
-        frame.append(body)
-        var checksum = (~crc).littleEndian
-        withUnsafeBytes(of: &checksum) { frame.append(contentsOf: $0) }
-        return frame
-    }
-}
-
-private extension Data {
-    mutating func appendLE(_ value: UInt16) {
-        var littleEndian = value.littleEndian
-        Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
-    }
 }

@@ -1,12 +1,12 @@
 # 近台 · Jintai
 
-近台是一个桌面交互终端项目。ESP32-P4 设备端提供应用选择、输入诊断、鼠标和会话监看。通过 USB-UART 连接 [Mac 菜单栏应用](host/README.md)，可使用鼠标桥接和会话监看。会话列表支持 Codex、OpenCode、Claude Code 和 Pi，鼠标也支持原生 USB HID。
+近台是一个桌面交互终端项目。ESP32-P4 设备端提供应用选择、输入诊断、鼠标、会话监看和 Clawd 桌宠。通过 USB-UART 连接 [Mac 菜单栏应用](host/README.md)，可使用鼠标桥接和会话监看。会话列表支持 Codex、OpenCode、Claude Code 和 Pi，鼠标也支持原生 USB HID。
 
 项目基于一台 HachimoDock 设备开展开发与验证。实验记录区分实机观测、参考资料和未验证的推断，并注明测试条件与限制。
 
 ## 诊断固件
 
-- [ESP32-P4 v3 固件](firmware/README.md)包含应用选择器、输入诊断台、鼠标、会话监看和一个占位应用。
+- [ESP32-P4 v3 固件](firmware/README.md)包含应用选择器、输入诊断台、鼠标、会话监看和 Clawd 桌宠。
 
 ## 实验记录
 

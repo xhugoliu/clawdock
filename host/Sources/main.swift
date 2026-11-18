@@ -9,7 +9,11 @@ if let index = CommandLine.arguments.firstIndex(where: { $0 == "--test-codex-ser
         print("Sessions TX bytes=\(frame.count)"); fflush(stdout)
         serial.sendLatest(frame)
     }
-    serial.onLine = { line in print(line); fflush(stdout); sessions.receive(line: line) }
+    serial.onLine = { line in
+        print(line); fflush(stdout)
+        if let clock = clockResponse(to: line) { serial.sendClock(clock) }
+        else { sessions.receive(line: line) }
+    }
     serial.onDisconnect = { sessions.reset(); exit(0) }
     do {
         try serial.connect(CommandLine.arguments[index + 1])

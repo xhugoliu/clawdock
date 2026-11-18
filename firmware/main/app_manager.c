@@ -10,6 +10,8 @@ void app_manager_init(app_manager_t *manager)
 {
     memset(manager, 0, sizeof(*manager));
     app_start(&manager->runtime, manager->view.current);
+    clawd_init(&manager->clawd);
+    manager->view.clawd = manager->clawd.view;
 }
 
 static bool switches_released(const app_input_t *in)
@@ -29,6 +31,8 @@ static void block_input(app_manager_t *m)
     m->chord_pending = false;
     m->pending_count = 0;
     m->chord_locked = true;
+    m->clawd.touch_down = false;
+    m->clawd.action_requested = false;
 }
 
 void app_manager_wake(app_manager_t *manager)
@@ -40,7 +44,7 @@ void app_manager_wake(app_manager_t *manager)
     block_input(manager);
 }
 
-static void deliver_button(app_manager_t *m, unsigned button, bool pressed)
+static void deliver_button(app_manager_t *m, unsigned button, bool pressed, int64_t now_ms)
 {
     if (m->view.current == JINTAI_CODEX_APP && pressed) {
         if (button == 1 && m->view.codex_has_selection && !m->view.codex_detail) {
@@ -50,12 +54,12 @@ static void deliver_button(app_manager_t *m, unsigned button, bool pressed)
             m->view.codex_detail = false;
         }
     }
+    if (m->view.current == JINTAI_CLAWD_APP && pressed) clawd_button(&m->clawd, button, now_ms);
     app_button(&m->runtime, m->view.current, button, pressed);
-    m->view.presses = m->runtime.presses;
     m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
 }
 
-static void flush_pending(app_manager_t *m)
+static void flush_pending(app_manager_t *m, int64_t now_ms)
 {
     if (m->view.current == 1) {
         unsigned seen = 0, held = 0;
@@ -75,7 +79,7 @@ static void flush_pending(app_manager_t *m)
         }
     }
     for (unsigned i = 0; i < m->pending_count; ++i)
-        deliver_button(m, m->pending[i].button, m->pending[i].pressed);
+        deliver_button(m, m->pending[i].button, m->pending[i].pressed, now_ms);
     m->pending_count = 0;
     m->chord_pending = false;
 }
@@ -86,7 +90,7 @@ static void select_current(app_manager_t *m)
         app_stop(&m->runtime, m->view.current);
         m->view.current = m->view.selected;
         app_start(&m->runtime, m->view.current);
-        m->view.presses = m->runtime.presses;
+        if (m->view.current == JINTAI_CLAWD_APP) m->clawd.next_auto_ms = 0;
         m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
         m->view.codex_row = 0;
         memset(m->view.codex_id, 0, sizeof(m->view.codex_id));
@@ -179,7 +183,7 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
 
     /* Once events were delivered, a late third switch cannot start a chord. */
     if (m->chord_pending && now_ms > m->chord_deadline_ms) {
-        flush_pending(m);
+        flush_pending(m, now_ms);
         m->chord_locked = true;
         if (m->mouse_chord) {
             if (switches_released(in)) {
@@ -201,12 +205,12 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
                 m->pending[m->pending_count].button = i;
                 m->pending[m->pending_count++].pressed = in->buttons[i];
             } else {
-                flush_pending(m);
+                flush_pending(m, now_ms);
                 m->chord_locked = true;
-                deliver_button(m, i, in->buttons[i]);
+                deliver_button(m, i, in->buttons[i], now_ms);
             }
         } else {
-            deliver_button(m, i, in->buttons[i]);
+            deliver_button(m, i, in->buttons[i], now_ms);
         }
     }
     if (m->chord_pending && switches_pressed(in)) {
@@ -219,7 +223,14 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
         navigate(m, in);
         return;
     }
-    if (m->chord_pending && switches_released(in)) flush_pending(m);
+    if (m->chord_pending && switches_released(in)) flush_pending(m, now_ms);
     if (m->chord_locked && switches_released(in)) m->chord_locked = false;
     if (m->view.current == JINTAI_CODEX_APP && !m->chord_pending) navigate_codex(m, in);
+    if (m->view.current == JINTAI_CLAWD_APP) {
+        bool active = !m->chord_pending;
+        if (active && in->buttons[3] && !old[3]) clawd_button(&m->clawd, 3, now_ms);
+        clawd_update(&m->clawd, active && in->joystick_ready ? in->joystick_x : 0,
+                     active && in->joystick_ready ? in->joystick_y : 0, active ? in->touch : NULL, now_ms);
+        m->view.clawd = m->clawd.view;
+    }
 }

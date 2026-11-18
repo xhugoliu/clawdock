@@ -134,6 +134,12 @@ with tempfile.TemporaryDirectory() as temp:
     try:
         assert proc.stdout is not None
         assert '测试串口已连接' in proc.stdout.readline().decode()
+        kind, clock = request(master, 'JT_TIME 1')
+        assert kind == 3 and len(clock) == 4
+        (millis,) = struct.unpack('<I', clock)
+        local = dt.datetime.now()
+        expected = ((local.hour * 60 + local.minute) * 60 + local.second) * 1000 + local.microsecond // 1000
+        assert millis < 86_400_000 and (expected - millis) % 86_400_000 < 2000
         rows = poll(master)
         assert {key: value[0] for key, value in rows.items()} == {running: 1, other: 1, long_running: 1}
         assert sum(bin(byte).count('1') for byte in rows[running][1]) > 100, 'CJK title is empty or incomplete'

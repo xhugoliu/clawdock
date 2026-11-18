@@ -1,10 +1,11 @@
 #include "app_ui.h"
 #include "app_ui_theme.h"
+#include "miniz.h"
 #include <stdio.h>
 #include <string.h>
 
-#define WIDTH 640
-#define HEIGHT 480
+#define WIDTH UI_WIDTH
+#define HEIGHT UI_HEIGHT
 #define CONTENT_WIDTH (WIDTH - UI_LEFT_MARGIN)
 #define CONTENT_X (UI_LEFT_MARGIN + UI_INSET)
 #define FOOTER_BASELINE (HEIGHT - UI_FOOTER_DESCENT)
@@ -15,6 +16,7 @@ static const char apps_hint[] = "Apps: hold all 3 keys";
 static const char move_hint[] = "Stick: up / down";
 
 extern const uint8_t ui_font_data[] __asm__("_binary_app_ui_font_bin_start");
+extern const uint8_t clawd_frames[] __asm__("_binary_clawd_frames_bin_start");
 
 /* One landscape pixel maps to the panel's clockwise quarter-turn. */
 static void pixel(int x, int y, uint16_t color)
@@ -280,7 +282,7 @@ static void codex_status(int right, int baseline, uint8_t status, int64_t now_ms
 static const char *codex_link_status(const lab_display_state_t *state)
 {
     if (!state->codex_last_contact_ms) return "Waiting for Mac";
-    if (state->codex_now_ms - state->codex_last_contact_ms > CODEX_TIMEOUT_MS) return "Mac is offline";
+    if (state->now_ms - state->codex_last_contact_ms > CODEX_TIMEOUT_MS) return "Mac is offline";
     return NULL;
 }
 
@@ -289,7 +291,7 @@ static void draw_codex_detail(const lab_display_state_t *state)
     const codex_detail_t *detail = state->codex_detail;
     const char *notice = codex_link_status(state);
     if (!notice) {
-        if (!detail || !detail->received_ms || state->codex_now_ms - detail->received_ms > CODEX_TIMEOUT_MS ||
+        if (!detail || !detail->received_ms || state->now_ms - detail->received_ms > CODEX_TIMEOUT_MS ||
             memcmp(detail->id, state->app.codex_id, CODEX_ID_BYTES) != 0) notice = "Loading session";
         else if (!detail->pages) notice = "Session unavailable";
     }
@@ -301,7 +303,7 @@ static void draw_codex_detail(const lab_display_state_t *state)
     }
 
     codex_bitmap(UI_LEFT_MARGIN, 5, detail->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
-    codex_status(WIDTH, UI_TITLE_BASELINE, detail->session.state, state->codex_now_ms);
+    codex_status(WIDTH, UI_TITLE_BASELINE, detail->session.state, state->now_ms);
 
     char page[24];
     snprintf(page, sizeof(page), "Page %u / %u", state->app.codex_page + 1, detail->pages);
@@ -327,7 +329,7 @@ static void draw_codex(const lab_display_state_t *state)
     page_title(app_title(state->app.current));
     const char *empty = codex_link_status(state);
     if (!empty) {
-        if (!snapshot || !snapshot->received_ms || state->codex_now_ms - snapshot->received_ms > CODEX_TIMEOUT_MS)
+        if (!snapshot || !snapshot->received_ms || state->now_ms - snapshot->received_ms > CODEX_TIMEOUT_MS)
             empty = "Loading sessions";
         else if (!snapshot->available) empty = "Session sources unavailable";
         else if (!snapshot->count) empty = "No active sessions";
@@ -352,23 +354,117 @@ static void draw_codex(const lab_display_state_t *state)
         int title_y = y + (ROW_HEIGHT - CODEX_TITLE_HEIGHT - CODEX_PREVIEW_HEIGHT - UI_SPACE) / 2;
         list_row(y, ROW_HEIGHT, focus == i);
         codex_bitmap(CONTENT_X, title_y, row->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
-        codex_status(WIDTH - UI_INSET, title_y + 25, row->session.state, state->codex_now_ms);
+        codex_status(WIDTH - UI_INSET, title_y + 25, row->session.state, state->now_ms);
         if (row->has_preview)
             codex_bitmap(CONTENT_X, title_y + CODEX_TITLE_HEIGHT + UI_SPACE, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
     }
     footer("SW2: details", NULL, snapshot->count > 1 ? move_hint : NULL);
 }
 
-static void draw_placeholder(const app_view_t *app)
+static unsigned read_u16(const uint8_t *bytes)
 {
-    page_title(app_title(app->current));
-    rect(UI_LEFT_MARGIN, UI_CONTENT_TOP, CONTENT_WIDTH, 160, UI_SURFACE);
-    text_at(CONTENT_X, UI_CONTENT_TOP + 38, "Button presses", UI_FONT_BODY, UI_TEXT);
-    char count[20];
-    snprintf(count, sizeof(count), "%u", app->presses);
-    text_at(CONTENT_X, UI_CONTENT_TOP + 92, count, UI_FONT_TITLE, UI_TEXT);
-    text_at(CONTENT_X, UI_CONTENT_TOP + 135, "Resets when you switch apps", UI_FONT_HINT, UI_SECONDARY);
-    footer(apps_hint, NULL, NULL);
+    return bytes[0] | (unsigned)bytes[1] << 8;
+}
+
+typedef struct { int left, top, right, bottom; } sprite_area_t;
+
+enum { CLAWD_RUN_BYTES = 4 };
+static uint8_t clawd_runs[24 * 1024];
+
+static size_t decode_clawd_runs(uint32_t offset)
+{
+    static tinfl_decompressor decoder;
+    static uint32_t cached_offset;
+    static size_t cached_size;
+    if (cached_size && offset == cached_offset) return cached_size;
+
+    const uint8_t *block = clawd_frames + offset;
+    size_t input_size = read_u16(block), output_size = sizeof(clawd_runs);
+    tinfl_init(&decoder);
+    tinfl_status result = tinfl_decompress(&decoder, block + 2, &input_size, clawd_runs, clawd_runs, &output_size,
+                                           TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    cached_offset = offset;
+    cached_size = result == TINFL_STATUS_DONE && output_size % CLAWD_RUN_BYTES == 0 ? output_size : 0;
+    return cached_size;
+}
+
+static void sprite_span(const sprite_area_t *area, int x, int y, int width,
+                        uint16_t color, unsigned alpha)
+{
+    if (y < area->top || y >= area->bottom) return;
+    int left = x < area->left ? area->left : x;
+    int right = x + width > area->right ? area->right : x + width;
+    if (left >= right) return;
+    if (alpha == 15) {
+        rect(left, y, right - left, 1, color);
+        return;
+    }
+    for (int col = left; col < right; ++col) {
+        uint16_t *target = fb + (size_t)col * HEIGHT + HEIGHT - 1 - y;
+        *target = blend(*target, color, alpha);
+    }
+}
+
+static int ceil_div(int value, int divisor)
+{
+    return value / divisor + (value % divisor > 0);
+}
+
+static void draw_clawd_sprite(const clawd_view_t *pet, int x, int y, int pixel_step, int64_t now_ms,
+                              const sprite_area_t *area)
+{
+    enum { CLIP_RECORD_BYTES = 6, FRAME_RECORD_BYTES = 12 };
+    const uint8_t *clip = clawd_frames + pet->pose * CLIP_RECORD_BYTES;
+    int64_t elapsed = now_ms > pet->pose_started_ms ? now_ms - pet->pose_started_ms : 0;
+    unsigned index = read_u16(clip) + elapsed / read_u16(clip + 4) % read_u16(clip + 2);
+    const uint8_t *frame = clawd_frames + CLAWD_POSE_COUNT * CLIP_RECORD_BYTES + index * FRAME_RECORD_BYTES;
+    uint32_t data_offset = read_u16(frame) | (uint32_t)read_u16(frame + 2) << 16;
+    int left = (int16_t)read_u16(frame + 4), top = (int16_t)read_u16(frame + 6);
+    int width = read_u16(frame + 8), height = read_u16(frame + 10);
+    if (pet->face_left) left = -left - width;
+
+    size_t decoded_size = decode_clawd_runs(data_offset);
+    int row = 0, col = 0;
+    for (const uint8_t *run = clawd_runs; row < height && run < clawd_runs + decoded_size; run += CLAWD_RUN_BYTES) {
+        unsigned alpha = run[1];
+        int remaining = run[0];
+        while (remaining && row < height) {
+            int count = remaining < width - col ? remaining : width - col;
+            int dy = top + row;
+            if (alpha && dy % pixel_step == 0) {
+                int start = left + (pet->face_left ? width - col - count : col);
+                int first = ceil_div(start, pixel_step), after = ceil_div(start + count, pixel_step);
+                sprite_span(area, x + first, y + dy / pixel_step, after - first,
+                            read_u16(run + 2), alpha);
+            }
+            remaining -= count;
+            col += count;
+            if (col == width) {
+                col = 0;
+                ++row;
+            }
+        }
+    }
+}
+
+static void draw_clawd(const lab_display_state_t *state)
+{
+    const sprite_area_t stage = {UI_LEFT_MARGIN, UI_CONTENT_TOP - UI_INSET, WIDTH, FOOTER_BASELINE - 56};
+    const clawd_view_t *pet = &state->app.clawd;
+    char clock[] = "--:--";
+    if (state->local_minute >= 0 && state->local_minute < 24 * 60) {
+        int hour = state->local_minute / 60, minute = state->local_minute % 60;
+        clock[0] = '0' + hour / 10;
+        clock[1] = '0' + hour % 10;
+        clock[3] = '0' + minute / 10;
+        clock[4] = '0' + minute % 10;
+    }
+    page_title(app_title(JINTAI_CLAWD_APP));
+    text_end(WIDTH - UI_INSET, UI_TITLE_BASELINE, clock, UI_FONT_TITLE, UI_TEXT);
+    draw_clawd_sprite(pet, pet->x, pet->y, 1, state->now_ms, &stage);
+    text_at(UI_LEFT_MARGIN, FOOTER_BASELINE - 32, "Stick: move", UI_FONT_HINT, UI_SECONDARY);
+    footer("SW1-SW3 / tap Clawd: action", NULL,
+           pet->pose == CLAWD_SLEEPING ? "Stick press: wake" : "Stick press: sleep");
 }
 
 void app_ui_sleep_warning(uint16_t *buffer)
@@ -389,6 +485,6 @@ void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
         case 0: draw_diagnostics(state); break;
         case 1: draw_mouse(&state->app); break;
         case JINTAI_CODEX_APP: draw_codex(state); break;
-        default: draw_placeholder(&state->app); break;
+        case JINTAI_CLAWD_APP: draw_clawd(state); break;
     }
 }

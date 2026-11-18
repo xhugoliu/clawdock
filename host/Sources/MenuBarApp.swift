@@ -18,7 +18,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mouse.enabled = UserDefaults.standard.object(forKey: "mouseEnabled") as? Bool ?? true
         sessions.enabled = UserDefaults.standard.object(forKey: "codexEnabled") as? Bool ?? true
         sessions.send = { [weak self] in self?.serial.sendLatest($0) }
-        serial.onLine = { [weak self] line in self?.modules.forEach { $0.receive(line: line) } }
+        serial.onLine = { [weak self] line in
+            guard let self else { return }
+            if let clock = clockResponse(to: line) { self.serial.sendClock(clock) }
+            else { self.modules.forEach { $0.receive(line: line) } }
+        }
         serial.onDisconnect = { [weak self] in
             guard let self else { return }
             self.modules.forEach { $0.reset() }

@@ -9,6 +9,7 @@ final class SerialConnection {
     private var writing = Data()
     private var written = 0
     private var pendingWrite: Data?
+    private var pendingClock: Data?
     private let parser = BridgeProtocol()
     var onLine: ((String) -> Void)?
     var onDisconnect: (() -> Void)?
@@ -58,6 +59,12 @@ final class SerialConnection {
         writeAvailable()
     }
 
+    func sendClock(_ data: Data) {
+        guard fd >= 0 else { return }
+        pendingClock = data
+        writeAvailable()
+    }
+
     private func retryWrite() {
         guard writeRetry == nil else { return }
         let handle = fd
@@ -73,14 +80,15 @@ final class SerialConnection {
     private func writeAvailable() {
         while fd >= 0 {
             if written == writing.count {
-                guard let next = pendingWrite else {
+                guard let next = pendingClock ?? pendingWrite else {
                     writeRetry?.cancel(); writeRetry = nil
                     writing = Data(); written = 0
                     return
                 }
                 writing = next
                 written = 0
-                pendingWrite = nil
+                if pendingClock != nil { pendingClock = nil }
+                else { pendingWrite = nil }
             }
             let count = writing.withUnsafeBytes { bytes in
                 write(fd, bytes.baseAddress?.advanced(by: written), bytes.count - written)
@@ -100,7 +108,7 @@ final class SerialConnection {
         let wasConnected = fd >= 0
         fd = -1; path = nil
         writeRetry?.cancel(); writeRetry = nil
-        writing = Data(); written = 0; pendingWrite = nil
+        writing = Data(); written = 0; pendingWrite = nil; pendingClock = nil
         source?.cancel(); source = nil
         parser.reset()
         if notify && wasConnected { onDisconnect?() }

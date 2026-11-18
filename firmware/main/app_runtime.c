@@ -14,17 +14,12 @@ static void mouse_app_button(app_runtime_t *runtime, unsigned button, bool press
     mouse_button(&runtime->mouse, button, pressed);
 }
 
-static void placeholder_button(app_runtime_t *runtime, unsigned button, bool pressed)
-{
-    if (button < 3 && pressed) ++runtime->presses;
-}
-
 /* Apps are built into the firmware. Only the active app has a runtime. */
 static const app_definition_t apps[JINTAI_APP_COUNT] = {
     { .name = "INPUT LAB", .title = "Input Lab" },
     { .name = "MOUSE", .title = "Mouse", .button = mouse_app_button },
     [JINTAI_CODEX_APP] = { .name = "SESSIONS", .title = "Sessions" },
-    { .name = "APP THREE", .title = "App Three", .button = placeholder_button },
+    [JINTAI_CLAWD_APP] = { .name = "CLAWD", .title = "Clawd" },
 };
 
 const char *app_name(unsigned app)

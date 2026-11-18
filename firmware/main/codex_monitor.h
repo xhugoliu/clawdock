@@ -17,6 +17,7 @@
 #define CODEX_MAX_PAGES 24
 #define CODEX_MAX_PAYLOAD 27000
 #define CODEX_FRAME_BYTES (4 + 3 + CODEX_MAX_PAYLOAD + 4)
+#define JINTAI_DAY_MS 86400000U
 
 typedef enum {
     CODEX_RUNNING = 1,
@@ -70,7 +71,8 @@ typedef enum {
     CODEX_FRAME_NONE,
     CODEX_FRAME_LIST,
     CODEX_FRAME_DETAIL,
+    CODEX_FRAME_CLOCK,
 } codex_frame_t;
 
 codex_frame_t codex_decoder_byte(codex_decoder_t *decoder, uint8_t byte,
-                                 codex_snapshot_t *list, codex_detail_t *detail);
+                                 codex_snapshot_t *list, codex_detail_t *detail, uint32_t *clock_ms);

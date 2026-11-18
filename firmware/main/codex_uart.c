@@ -12,9 +12,12 @@ static SemaphoreHandle_t lock;
 static codex_snapshot_t latest;
 static codex_detail_t latest_detail;
 static codex_decoder_t decoder;
+static int64_t clock_received_ms;
+static uint32_t clock_day_ms;
 static union {
     codex_snapshot_t list;
     codex_detail_t detail;
+    uint32_t clock_ms;
 } incoming;
 
 static void receive_task(void *unused)
@@ -30,8 +33,21 @@ static void receive_task(void *unused)
         if (decoder.used && now_ms - last_byte_ms > 250) decoder.used = 0;
         if (count > 0) last_byte_ms = now_ms;
         for (int i = 0; i < count; ++i) {
-            codex_frame_t frame = codex_decoder_byte(&decoder, bytes[i], &incoming.list, &incoming.detail);
+            codex_frame_t frame = codex_decoder_byte(&decoder, bytes[i], &incoming.list, &incoming.detail,
+                                                      &incoming.clock_ms);
             if (frame == CODEX_FRAME_NONE) continue;
+            if (frame == CODEX_FRAME_CLOCK) {
+                xSemaphoreTake(lock, portMAX_DELAY);
+                bool first = !clock_received_ms;
+                clock_day_ms = incoming.clock_ms;
+                clock_received_ms = now_ms;
+                xSemaphoreGive(lock);
+                if (first) {
+                    unsigned minute = incoming.clock_ms / 60000;
+                    printf("JT_TIME SYNC %02u:%02u\n", minute / 60, minute % 60);
+                }
+                continue;
+            }
             if (frame == CODEX_FRAME_DETAIL) {
                 incoming.detail.received_ms = now_ms;
                 xSemaphoreTake(lock, portMAX_DELAY);
@@ -80,10 +96,15 @@ esp_err_t codex_uart_init(void)
 void codex_uart_request(const uint8_t *id, unsigned page, int64_t now_ms)
 {
     static int64_t next_request_ms;
+    static int64_t next_clock_request_ms;
     static bool was_detail;
     static unsigned last_page;
     static uint8_t last_id[CODEX_ID_BYTES];
     if (!lock) return;
+    if (now_ms >= next_clock_request_ms) {
+        printf("JT_TIME 1\n");
+        next_clock_request_ms = now_ms + 5000;
+    }
     bool detail = id != NULL;
     bool changed = detail != was_detail || (detail && (page != last_page || memcmp(last_id, id, CODEX_ID_BYTES) != 0));
     if (!changed && now_ms < next_request_ms) return;
@@ -133,4 +154,16 @@ int64_t codex_uart_read(codex_snapshot_t *list, codex_detail_t *detail)
     int64_t last_contact = latest.received_ms > latest_detail.received_ms ? latest.received_ms : latest_detail.received_ms;
     xSemaphoreGive(lock);
     return last_contact;
+}
+
+int codex_uart_local_minute(int64_t now_ms)
+{
+    if (!lock) return -1;
+    xSemaphoreTake(lock, portMAX_DELAY);
+    int64_t synced_at = clock_received_ms;
+    uint32_t day_ms = clock_day_ms;
+    xSemaphoreGive(lock);
+    if (!synced_at) return -1;
+    int64_t elapsed = now_ms > synced_at ? now_ms - synced_at : 0;
+    return (day_ms + elapsed) % JINTAI_DAY_MS / 60000;
 }

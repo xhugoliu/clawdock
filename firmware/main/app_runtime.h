@@ -4,9 +4,9 @@
 
 #define JINTAI_APP_COUNT 4
 #define JINTAI_CODEX_APP 2
+#define JINTAI_CLAWD_APP 3
 
 typedef struct {
-    unsigned presses;
     mouse_t mouse;
 } app_runtime_t;
 

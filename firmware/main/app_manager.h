@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "app_runtime.h"
+#include "clawd.h"
 #include "codex_monitor.h"
 
 typedef struct {
@@ -13,6 +14,7 @@ typedef struct {
     bool touch_available;
     bool touch_ready;
     unsigned touch_count;
+    const lab_touch_state_t *touch;
     const codex_summary_t *codex;
 } app_input_t;
 
@@ -20,8 +22,8 @@ typedef struct {
     unsigned current;
     unsigned selected;
     bool choosing;
-    unsigned presses;
     bool mouse_scroll;
+    clawd_view_t clawd;
     unsigned codex_row;
     uint8_t codex_id[CODEX_ID_BYTES];
     bool codex_has_selection;
@@ -32,6 +34,7 @@ typedef struct {
 typedef struct {
     app_view_t view;
     app_runtime_t runtime;
+    clawd_t clawd;
     bool previous[4];
     bool input_blocked;
     bool navigation_armed;

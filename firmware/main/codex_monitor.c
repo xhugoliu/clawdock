@@ -13,6 +13,11 @@ static unsigned little_endian_16(const uint8_t *bytes)
     return bytes[0] | (unsigned)bytes[1] << 8;
 }
 
+static uint32_t little_endian_32(const uint8_t *bytes)
+{
+    return little_endian_16(bytes) | (uint32_t)little_endian_16(bytes + 2) << 16;
+}
+
 static uint32_t crc32(const uint8_t *bytes, size_t length)
 {
     uint32_t crc = UINT32_MAX;
@@ -91,7 +96,7 @@ static bool read_detail(reader_t *reader, codex_detail_t *detail)
 }
 
 codex_frame_t codex_decoder_byte(codex_decoder_t *decoder, uint8_t byte,
-                                 codex_snapshot_t *list, codex_detail_t *detail)
+                                 codex_snapshot_t *list, codex_detail_t *detail, uint32_t *clock_ms)
 {
     if (decoder->used < sizeof(magic) && byte != magic[decoder->used]) {
         decoder->used = byte == magic[0] ? 1 : 0;
@@ -102,7 +107,9 @@ codex_frame_t codex_decoder_byte(codex_decoder_t *decoder, uint8_t byte,
     const uint8_t *body = decoder->data + sizeof(magic);
     if (decoder->used == header) {
         unsigned length = little_endian_16(body + 1);
-        if ((body[0] != CODEX_FRAME_LIST && body[0] != CODEX_FRAME_DETAIL) || length > CODEX_MAX_PAYLOAD) {
+        bool valid = body[0] == CODEX_FRAME_CLOCK ? length == 4 :
+                     (body[0] == CODEX_FRAME_LIST || body[0] == CODEX_FRAME_DETAIL) && length <= CODEX_MAX_PAYLOAD;
+        if (!valid) {
             decoder->used = byte == magic[0] ? 1 : 0;
             return CODEX_FRAME_NONE;
         }
@@ -111,9 +118,14 @@ codex_frame_t codex_decoder_byte(codex_decoder_t *decoder, uint8_t byte,
     if (decoder->used < header || decoder->used != decoder->expected) return CODEX_FRAME_NONE;
     decoder->used = 0;
     const uint8_t *checksum = decoder->data + decoder->expected - 4;
-    uint32_t expected = (uint32_t)checksum[0] | (uint32_t)checksum[1] << 8 |
-                        (uint32_t)checksum[2] << 16 | (uint32_t)checksum[3] << 24;
+    uint32_t expected = little_endian_32(checksum);
     if (crc32(body, checksum - body) != expected) return CODEX_FRAME_NONE;
+    if (body[0] == CODEX_FRAME_CLOCK) {
+        uint32_t value = little_endian_32(body + 3);
+        if (value >= JINTAI_DAY_MS) return CODEX_FRAME_NONE;
+        *clock_ms = value;
+        return CODEX_FRAME_CLOCK;
+    }
     reader_t reader = { .at = body + 3, .end = checksum };
     if (body[0] == CODEX_FRAME_LIST)
         return read_list(&reader, list) ? CODEX_FRAME_LIST : CODEX_FRAME_NONE;

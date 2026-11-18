@@ -17,6 +17,8 @@ enum {
 };
 
 enum {
+    UI_WIDTH = 640,
+    UI_HEIGHT = 480,
     UI_SPACE = 8,
     UI_INSET = 2 * UI_SPACE,
     UI_LEFT_MARGIN = 4 * UI_SPACE,

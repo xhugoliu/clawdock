@@ -102,8 +102,10 @@ static void display_task(void *unused)
                             state.codex = &display_codex.list;
                             state.codex_last_contact_ms = codex_uart_read(&display_codex.list, NULL);
                         }
-                        state.codex_now_ms = esp_timer_get_time() / 1000;
                     }
+                    state.now_ms = esp_timer_get_time() / 1000;
+                    if (state.app.current == JINTAI_CLAWD_APP && !state.app.choosing)
+                        state.local_minute = codex_uart_local_minute(state.now_ms);
                     status = lab_display_update(&state);
                 }
                 if (status == ESP_OK && !awake) {
@@ -120,7 +122,9 @@ static void display_task(void *unused)
                 return;
             }
         }
-        vTaskDelayUntil(&last, pdMS_TO_TICKS(100));
+        bool clawd_active = state.awake && !state.sleep_warning && !state.app.choosing &&
+                            state.app.current == JINTAI_CLAWD_APP;
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(clawd_active ? 50 : 100));
     }
 }
 
@@ -284,6 +288,7 @@ void app_main(void)
                     .touch_available = touch_init == ESP_OK,
                     .touch_ready = touch.ready,
                     .touch_count = touch.reported,
+                    .touch = &state.touch,
                     .codex = &codex,
                 };
                 for (unsigned i = 0; i < 4; ++i) input.buttons[i] = state.buttons[i];

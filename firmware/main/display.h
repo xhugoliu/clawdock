@@ -18,7 +18,8 @@ typedef struct {
     app_view_t app;
     const codex_snapshot_t *codex;
     const codex_detail_t *codex_detail;
-    int64_t codex_now_ms;
+    int64_t now_ms;
+    int local_minute;
     int64_t codex_last_contact_ms;
 } lab_display_state_t;
 
