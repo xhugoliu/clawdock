@@ -2,9 +2,13 @@
 #include <stdbool.h>
 #include "mouse.h"
 
-#define JINTAI_APP_COUNT 4
-#define JINTAI_CODEX_APP 2
-#define JINTAI_CLAWD_APP 3
+enum {
+    JINTAI_CODEX_APP,
+    JINTAI_MOUSE_APP,
+    JINTAI_INPUT_APP,
+    JINTAI_CLAWD_APP,
+    JINTAI_APP_COUNT,
+};
 
 typedef struct {
     mouse_t mouse;

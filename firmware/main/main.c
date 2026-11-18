@@ -122,8 +122,9 @@ static void display_task(void *unused)
                 return;
             }
         }
-        bool clawd_active = state.awake && !state.sleep_warning && !state.app.choosing &&
-                            state.app.current == JINTAI_CLAWD_APP;
+        bool show_clawd = state.app.current == JINTAI_CLAWD_APP ||
+                          (state.app.current == JINTAI_CODEX_APP && !state.app.codex_detail);
+        bool clawd_active = state.awake && !state.sleep_warning && !state.app.choosing && show_clawd;
         vTaskDelayUntil(&last, pdMS_TO_TICKS(clawd_active ? 50 : 100));
     }
 }
@@ -202,6 +203,7 @@ void app_main(void)
 
     app_manager_t apps;
     app_manager_init(&apps);
+    printf("app startup current=%s\n", app_name(apps.view.current));
     bool system_awake = true;
     lab_joystick_cal_t joystick = {0};
     touchpad_t touchpad = {0};
@@ -213,7 +215,7 @@ void app_main(void)
     screen_idle_t screen_idle = { .last_event_us = esp_timer_get_time() };
     TickType_t last_sample = xTaskGetTickCount();
     while (true) {
-        bool diagnostics = apps.view.current == 0 && !apps.view.choosing;
+        bool diagnostics = apps.view.current == JINTAI_INPUT_APP && !apps.view.choosing;
         bool button_changed = sample_buttons(diagnostics);
         int x, y;
         esp_err_t x_result = adc_oneshot_read(adc, ADC1_GPIO21_CHANNEL, &x);
@@ -268,7 +270,7 @@ void app_main(void)
                                                       state.normalized_x, state.normalized_y, &state.touch);
             state.awake = phase != SCREEN_ASLEEP;
             state.sleep_warning = phase == SCREEN_WARNING;
-            if (!state.awake && system_awake && apps.view.current == 1) {
+            if (!state.awake && system_awake && apps.view.current == JINTAI_MOUSE_APP) {
                 mouse_release(&apps.runtime.mouse);
                 output_mouse_report(0, 0, 0, 0, 0);
                 touchpad_reset(&touchpad);
@@ -300,9 +302,9 @@ void app_main(void)
                            app_name(apps.view.current), apps.view.choosing ? "yes" : "no", app_name(apps.view.selected));
                 }
                 /* Preserve every button edge, including press/release within the chord window. */
-                if (previous_app.current == 1 && apps.view.current != 1)
+                if (previous_app.current == JINTAI_MOUSE_APP && apps.view.current != JINTAI_MOUSE_APP)
                     output_mouse_report(0, 0, 0, 0, 0);
-                if (apps.view.current == 1) {
+                if (apps.view.current == JINTAI_MOUSE_APP) {
                     uint8_t button_state;
                     while (mouse_peek(&apps.runtime.mouse, &button_state)) {
                         output_mouse_report(button_state, 0, 0, 0, 0);

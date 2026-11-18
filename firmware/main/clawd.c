@@ -23,11 +23,16 @@ static const unsigned action_duration_ms[CLAWD_POSE_COUNT] = {
     [CLAWD_SNACK] = 2000,
 };
 
+unsigned clawd_action_duration(clawd_pose_t pose)
+{
+    return action_duration_ms[pose];
+}
+
 static void set_pose(clawd_t *pet, clawd_pose_t pose, int64_t now_ms)
 {
     pet->view.pose = pose;
     pet->view.pose_started_ms = now_ms;
-    unsigned duration = action_duration_ms[pose];
+    unsigned duration = clawd_action_duration(pose);
     pet->action_ends_ms = duration ? now_ms + duration : 0;
 }
 
@@ -41,27 +46,30 @@ void clawd_init(clawd_t *pet)
     pet->y_millipixels = pet->view.y * PIXEL_UNIT;
 }
 
-static void react(clawd_t *pet, int64_t now_ms)
+uint32_t clawd_next_random(clawd_action_picker_t *picker, int64_t now_ms)
 {
-    static const clawd_pose_t actions[] = {CLAWD_HAPPY, CLAWD_GROOVING, CLAWD_JUGGLING, CLAWD_EUREKA,
-                                          CLAWD_HAT, CLAWD_COFFEE, CLAWD_DIZZY, CLAWD_SNACK};
-    clawd_pose_t choices[sizeof(actions) / sizeof(actions[0])];
-    unsigned count = 0;
-    for (unsigned i = 0; i < sizeof(actions) / sizeof(actions[0]); ++i) {
-        if (actions[i] != pet->recent_actions[0] && actions[i] != pet->recent_actions[1])
-            choices[count++] = actions[i];
-    }
-
-    uint32_t random = pet->random_state ^ (uint32_t)now_ms;
+    uint32_t random = picker->random_state ^ (uint32_t)now_ms;
     if (!random) random = 0x9e3779b9;
     random ^= random << 13;
     random ^= random >> 17;
     random ^= random << 5;
-    pet->random_state = random;
-    clawd_pose_t pose = choices[random % count];
-    pet->recent_actions[1] = pet->recent_actions[0];
-    pet->recent_actions[0] = pose;
-    set_pose(pet, pose, now_ms);
+    picker->random_state = random;
+    return random;
+}
+
+clawd_pose_t clawd_choose_action(clawd_action_picker_t *picker, unsigned preferred, int64_t now_ms)
+{
+    unsigned available = CLAWD_FUN_ACTIONS & ~((1U << picker->recent[0]) | (1U << picker->recent[1]));
+    unsigned eligible = available & preferred;
+    if (!eligible) eligible = available;
+    clawd_pose_t choices[CLAWD_POSE_COUNT];
+    unsigned count = 0;
+    for (clawd_pose_t pose = CLAWD_IDLE; pose < CLAWD_POSE_COUNT; ++pose)
+        if (eligible & (1U << pose)) choices[count++] = pose;
+
+    picker->recent[1] = picker->recent[0];
+    picker->recent[0] = choices[clawd_next_random(picker, now_ms) % count];
+    return picker->recent[0];
 }
 
 void clawd_button(clawd_t *pet, unsigned button, int64_t now_ms)
@@ -121,7 +129,7 @@ void clawd_update(clawd_t *pet, int stick_x, int stick_y, const lab_touch_state_
         if (pet->action_requested || (auto_due && pet->view.pose == CLAWD_IDLE)) {
             pet->action_requested = false;
             if (auto_due || sleeping) pet->next_auto_ms = now_ms + AUTO_ACTION_MS;
-            react(pet, now_ms);
+            set_pose(pet, clawd_choose_action(&pet->actions, CLAWD_FUN_ACTIONS, now_ms), now_ms);
         }
         return;
     }

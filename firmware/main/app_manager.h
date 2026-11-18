@@ -29,6 +29,8 @@ typedef struct {
     bool codex_has_selection;
     bool codex_detail;
     unsigned codex_page;
+    unsigned sessions_clawd_requests;
+    int sessions_clawd_stick_x;
 } app_view_t;
 
 typedef struct {

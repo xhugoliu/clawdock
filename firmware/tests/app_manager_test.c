@@ -59,27 +59,31 @@ static bool action_pose(clawd_pose_t pose)
 int main(void)
 {
     reset();
+    assert(manager.view.current == JINTAI_CODEX_APP && manager.view.current == 0);
     open_selector();
-    release_chord(); assert(!manager.view.choosing && manager.view.current == 0);
+    release_chord(); assert(!manager.view.choosing && manager.view.current == JINTAI_CODEX_APP);
     update(20);
     open_selector();
-    assert(manager.view.current == 0 && manager.view.selected == 0);
+    assert(manager.view.current == JINTAI_CODEX_APP && manager.view.selected == JINTAI_CODEX_APP);
     update(1000); assert(manager.view.choosing); /* Long hold never toggles. */
-    move(800); assert(manager.view.selected == JINTAI_APP_COUNT - 1); /* Wrap up. */
-    move(-800); assert(manager.view.selected == 0); /* Wrap down. */
-    move(-800); assert(manager.view.selected == 1);
+    move(800); assert(manager.view.selected == JINTAI_CLAWD_APP); /* Wrap up. */
+    move(-800); assert(manager.view.selected == JINTAI_CODEX_APP); /* Wrap down. */
+    move(-800); assert(manager.view.selected == JINTAI_MOUSE_APP);
     input.joystick_y = -800; update(20);
-    assert(manager.view.selected == 2);
-    update(500); assert(manager.view.selected == 2); /* One step until centered. */
+    assert(manager.view.selected == JINTAI_INPUT_APP);
+    update(500); assert(manager.view.selected == JINTAI_INPUT_APP); /* One step until centered. */
     input.joystick_y = 0; update(20);
-    assert(manager.view.current == 0); /* No switch while held. */
+    assert(manager.view.current == JINTAI_CODEX_APP); /* No switch while held. */
     input.buttons[0] = false; update(20);
     input.buttons[1] = false; update(20);
-    assert(manager.view.choosing && manager.view.current == 0); /* Wait for all up. */
+    assert(manager.view.choosing && manager.view.current == JINTAI_CODEX_APP); /* Wait for all up. */
     input.buttons[2] = false; update(20);
-    assert(!manager.view.choosing && manager.view.current == JINTAI_CODEX_APP);
+    assert(!manager.view.choosing && manager.view.current == JINTAI_INPUT_APP);
     codex_summary_t sessions = { .count = 3, .ids = {{1}, {2}, {3}} };
     input.codex = &sessions;
+    update(20);
+    open_selector(); move(800); move(800); release_chord();
+    assert(!manager.view.choosing && manager.view.current == JINTAI_CODEX_APP);
     update(20); /* Guard releases only after inputs return to neutral. */
     update(20); assert(manager.view.codex_row == 0);
     input.joystick_y = -800; update(20);
@@ -94,8 +98,19 @@ int main(void)
     move(-800); assert(manager.view.codex_row == 0 && manager.view.codex_id[0] == 2); /* Wrap down. */
     move(800); assert(manager.view.codex_row == 1 && manager.view.codex_id[0] == 3); /* Wrap up. */
 
+    input.joystick_x = 800;
+    update(20);
+    assert(manager.view.sessions_clawd_stick_x == 800 && manager.view.codex_row == 1);
+    input.buttons[0] = true; update(20);
+    assert(manager.view.sessions_clawd_stick_x == 800 && manager.view.sessions_clawd_requests == 0);
+    input.buttons[0] = false; update(20);
+    assert(manager.view.sessions_clawd_requests == 1 && !manager.view.codex_detail && manager.view.sessions_clawd_stick_x == 800);
     tap_sw(1);
     assert(manager.view.codex_detail && manager.view.codex_page == 0 && manager.view.codex_id[0] == 3);
+    assert(manager.view.sessions_clawd_stick_x == 0);
+    input.joystick_x = 0;
+    tap_sw(0);
+    assert(manager.view.sessions_clawd_requests == 1 && manager.view.codex_detail);
     move(-800); assert(manager.view.codex_page == 0); /* Wait for the first page. */
     sessions.detail_pages = 3;
     move(-800); assert(manager.view.codex_page == 1);
@@ -104,7 +119,7 @@ int main(void)
     move(800); assert(manager.view.codex_page == 1);
     open_selector(); assert(manager.view.codex_detail);
     release_chord(); update(20);
-    assert(manager.view.codex_detail && manager.view.codex_page == 1);
+    assert(manager.view.codex_detail && manager.view.codex_page == 1 && manager.view.sessions_clawd_requests == 1);
     tap_sw(2);
     assert(!manager.view.codex_detail && manager.view.codex_row == 1 && manager.view.codex_id[0] == 3);
     tap_sw(1); assert(manager.view.codex_detail && manager.view.codex_page == 0);
@@ -115,7 +130,7 @@ int main(void)
     release_chord(); /* Selecting the original app resumes its state. */
     assert(manager.view.current == JINTAI_CODEX_APP && manager.view.codex_row == 1);
     update(20);
-    open_selector(); move(-800);
+    open_selector(); move(800);
     release_chord();
     assert(manager.view.current == JINTAI_CLAWD_APP && manager.view.clawd.pose == CLAWD_IDLE);
     update(20); tap_sw(0);
@@ -128,14 +143,14 @@ int main(void)
     assert(!manager.view.choosing && manager.view.clawd.pose == initial_reaction);
     update(20);
     open_selector();
-    input.joystick_y = -800; update(20); /* Keep stick deflected after release. */
+    input.joystick_y = 800; update(20); /* Keep stick deflected after release. */
     release_chord();
-    assert(manager.view.current == 0 && manager.input_blocked);
+    assert(manager.view.current == JINTAI_INPUT_APP && manager.input_blocked);
     input.buttons[0] = true; update(20);
     assert(manager.view.clawd.pose == initial_reaction);
     input.buttons[0] = false; input.joystick_y = 0; update(20);
     assert(!manager.input_blocked);
-    open_selector(); move(800); release_chord(); update(20);
+    open_selector(); move(-800); release_chord(); update(20);
     assert(manager.view.current == JINTAI_CLAWD_APP && manager.view.clawd.pose == initial_reaction);
 
     /* A late third key cannot turn already delivered events into a chord. */
@@ -145,10 +160,10 @@ int main(void)
     assert(!manager.view.choosing && action_pose(manager.view.clawd.pose));
     release_chord();
 
-    clawd_pose_t before_sleep = manager.clawd.recent_actions[0];
+    clawd_pose_t before_sleep = manager.clawd.actions.recent[0];
     tap_sw(3); assert(manager.view.clawd.pose == CLAWD_SLEEPING);
     update(60000);
-    assert(manager.view.clawd.pose == CLAWD_SLEEPING && manager.clawd.recent_actions[0] == before_sleep);
+    assert(manager.view.clawd.pose == CLAWD_SLEEPING && manager.clawd.actions.recent[0] == before_sleep);
     int x = manager.view.clawd.x, y = manager.view.clawd.y;
     input.joystick_x = -1000; input.joystick_y = 1000; update(20);
     assert(manager.view.clawd.x == x && manager.view.clawd.y == y);
@@ -162,7 +177,7 @@ int main(void)
 
     update(manager.clawd.next_auto_ms - now - 1);
     assert(manager.view.clawd.pose == CLAWD_IDLE);
-    clawd_pose_t before_auto[2] = {manager.clawd.recent_actions[0], manager.clawd.recent_actions[1]};
+    clawd_pose_t before_auto[2] = {manager.clawd.actions.recent[0], manager.clawd.actions.recent[1]};
     update(1);
     clawd_pose_t automatic = manager.view.clawd.pose;
     assert(action_pose(automatic) && automatic != before_auto[0] && automatic != before_auto[1]);
@@ -183,7 +198,7 @@ int main(void)
 
     unsigned seen = 0;
     for (unsigned i = 0; i < 64; ++i) {
-        clawd_pose_t recent[2] = {manager.clawd.recent_actions[0], manager.clawd.recent_actions[1]};
+        clawd_pose_t recent[2] = {manager.clawd.actions.recent[0], manager.clawd.actions.recent[1]};
         if (i % 4 == 3) {
             touch.reported = touch.valid = input.touch_count = 1; update(20);
             touch.reported = touch.valid = input.touch_count = 0; update(20);
@@ -197,13 +212,13 @@ int main(void)
     assert(seen == ((1U << CLAWD_POSE_COUNT) - 1) - (1U << CLAWD_IDLE) - (1U << CLAWD_WALKING) - (1U << CLAWD_SLEEPING));
     input.touch = NULL;
 
-    clawd_pose_t last = manager.clawd.recent_actions[0], previous = manager.clawd.recent_actions[1];
+    clawd_pose_t last = manager.clawd.actions.recent[0], previous = manager.clawd.actions.recent[1];
     input.joystick_x = 800; update(manager.clawd.next_auto_ms - now);
-    assert(manager.view.clawd.pose == CLAWD_WALKING && manager.clawd.recent_actions[0] == last);
+    assert(manager.view.clawd.pose == CLAWD_WALKING && manager.clawd.actions.recent[0] == last);
     input.joystick_x = 0; update(20);
     assert(action_pose(manager.view.clawd.pose) && manager.view.clawd.pose != last && manager.view.clawd.pose != previous);
 
-    open_selector(); move(800); release_chord(); update(20); update(20);
+    open_selector(); move(-800); release_chord(); update(20); update(20);
     assert(manager.view.current == JINTAI_CODEX_APP && manager.view.codex_id[0] == 2);
     sessions.count = 1;
     move(-800);

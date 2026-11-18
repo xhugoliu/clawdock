@@ -17,7 +17,7 @@ static void start_mouse(void) {
     set(0, true); set(1, true); set(2, true);
     input.joystick_y = -800; update(20);
     input.joystick_y = 0; input.buttons[0] = input.buttons[1] = input.buttons[2] = false; update(20); update(20);
-    assert(app.view.current == 1 && !app.input_blocked);
+    assert(app.view.current == JINTAI_MOUSE_APP && !app.input_blocked);
 }
 int main(void) {
     start_mouse();
@@ -30,7 +30,7 @@ int main(void) {
     /* Third key within the window always opens the selector without mouse output. */
     set(0, true); set(1, true); set(2, true); assert(app.view.choosing); none();
     input.buttons[0] = input.buttons[1] = input.buttons[2] = false; update(20); update(20);
-    assert(app.view.current == 1 && app.view.mouse_scroll);
+    assert(app.view.current == JINTAI_MOUSE_APP && app.view.mouse_scroll);
     /* Wake releases a held mouse button and blocks inputs until neutral. */
     set(2, true); update(181); expect(MOUSE_LEFT); app_manager_wake(&app); expect(0); set(2, false); update(20);
     clear_events();

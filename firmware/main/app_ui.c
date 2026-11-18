@@ -1,5 +1,6 @@
 #include "app_ui.h"
 #include "app_ui_theme.h"
+#include "sessions_clawd.h"
 #include "miniz.h"
 #include <stdio.h>
 #include <string.h>
@@ -12,6 +13,8 @@
 #define CONTENT_BOTTOM (FOOTER_BASELINE - 30)
 
 static uint16_t *fb; /* Used only by the display task. */
+static sessions_clawd_t sessions_clawd;
+static unsigned sessions_clawd_requests;
 static const char apps_hint[] = "Apps: hold all 3 keys";
 static const char move_hint[] = "Stick: up / down";
 
@@ -316,11 +319,11 @@ static void draw_codex_detail(const lab_display_state_t *state)
     else codex_bitmap(CONTENT_X, UI_CONTENT_TOP + UI_SPACE, detail->reply, CODEX_DETAIL_HEIGHT, UI_TEXT);
 }
 
-static void draw_codex(const lab_display_state_t *state)
+static const codex_snapshot_t *draw_codex(const lab_display_state_t *state)
 {
     if (state->app.codex_detail) {
         draw_codex_detail(state);
-        return;
+        return NULL;
     }
     enum { FIRST_ROW = UI_CONTENT_TOP + UI_SPACE, VISIBLE_ROWS = 3,
            ROW_HEIGHT = (CONTENT_BOTTOM - FIRST_ROW - (VISIBLE_ROWS - 1) * UI_SPACE) / VISIBLE_ROWS };
@@ -332,12 +335,11 @@ static void draw_codex(const lab_display_state_t *state)
         if (!snapshot || !snapshot->received_ms || state->now_ms - snapshot->received_ms > CODEX_TIMEOUT_MS)
             empty = "Loading sessions";
         else if (!snapshot->available) empty = "Session sources unavailable";
-        else if (!snapshot->count) empty = "No active sessions";
     }
-    if (empty) {
-        text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53, empty, UI_FONT_BODY, UI_TEXT);
-        footer(apps_hint, NULL, NULL);
-        return;
+    if (empty || !snapshot->count) {
+        text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53, empty ? empty : "No active sessions", UI_FONT_BODY, UI_TEXT);
+        footer(empty ? apps_hint : "SW1: pet", NULL, empty ? NULL : "Stick: left / right");
+        return empty ? NULL : snapshot;
     }
 
     unsigned focus = state->app.codex_row < snapshot->count ? state->app.codex_row : snapshot->count - 1;
@@ -358,7 +360,8 @@ static void draw_codex(const lab_display_state_t *state)
         if (row->has_preview)
             codex_bitmap(CONTENT_X, title_y + CODEX_TITLE_HEIGHT + UI_SPACE, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
     }
-    footer("SW2: details", NULL, snapshot->count > 1 ? move_hint : NULL);
+    footer("SW1: pet", "SW2: details", snapshot->count > 1 ? "Stick: move / browse" : "Stick: left / right");
+    return snapshot;
 }
 
 static unsigned read_u16(const uint8_t *bytes)
@@ -368,7 +371,7 @@ static unsigned read_u16(const uint8_t *bytes)
 
 typedef struct { int left, top, right, bottom; } sprite_area_t;
 
-enum { CLAWD_RUN_BYTES = 4 };
+enum { CLAWD_RUN_BYTES = 4, CLAWD_CLIP_BYTES = 6, CLAWD_FRAME_BYTES = 12 };
 static uint8_t clawd_runs[24 * 1024];
 
 static size_t decode_clawd_runs(uint32_t offset)
@@ -410,18 +413,53 @@ static int ceil_div(int value, int divisor)
     return value / divisor + (value % divisor > 0);
 }
 
+static const uint8_t *clawd_frame(unsigned index)
+{
+    return clawd_frames + CLAWD_POSE_COUNT * CLAWD_CLIP_BYTES + index * CLAWD_FRAME_BYTES;
+}
+
+static bool clawd_mirrored(const clawd_view_t *pet)
+{
+    /* The walking source looks left. The other clips use the default orientation. */
+    return pet->face_left != (pet->pose == CLAWD_WALKING);
+}
+
+static int fit_clawd_x(const clawd_view_t *pet, int pixel_step, int64_t duration_ms, const sprite_area_t *area)
+{
+    const uint8_t *clip = clawd_frames + pet->pose * CLAWD_CLIP_BYTES;
+    unsigned first = read_u16(clip), count = read_u16(clip + 2), interval = read_u16(clip + 4);
+    if (duration_ms > 0 && duration_ms < (int64_t)count * interval)
+        count = (duration_ms + interval - 1) / interval;
+
+    bool mirrored = clawd_mirrored(pet);
+    int min_left = 0, max_right = 0;
+    for (unsigned i = 0; i < count; ++i) {
+        const uint8_t *frame = clawd_frame(first + i);
+        int left = (int16_t)read_u16(frame + 4), width = read_u16(frame + 8);
+        if (mirrored) left = -left - width;
+        if (left < min_left) min_left = left;
+        if (left + width > max_right) max_right = left + width;
+    }
+
+    int min_x = area->left - ceil_div(min_left, pixel_step);
+    int max_x = area->right - ceil_div(max_right, pixel_step);
+    if (pet->x < min_x) return min_x;
+    if (pet->x > max_x) return max_x;
+    return pet->x;
+}
+
 static void draw_clawd_sprite(const clawd_view_t *pet, int x, int y, int pixel_step, int64_t now_ms,
                               const sprite_area_t *area)
 {
-    enum { CLIP_RECORD_BYTES = 6, FRAME_RECORD_BYTES = 12 };
-    const uint8_t *clip = clawd_frames + pet->pose * CLIP_RECORD_BYTES;
+    const uint8_t *clip = clawd_frames + pet->pose * CLAWD_CLIP_BYTES;
     int64_t elapsed = now_ms > pet->pose_started_ms ? now_ms - pet->pose_started_ms : 0;
     unsigned index = read_u16(clip) + elapsed / read_u16(clip + 4) % read_u16(clip + 2);
-    const uint8_t *frame = clawd_frames + CLAWD_POSE_COUNT * CLIP_RECORD_BYTES + index * FRAME_RECORD_BYTES;
+    const uint8_t *frame = clawd_frame(index);
     uint32_t data_offset = read_u16(frame) | (uint32_t)read_u16(frame + 2) << 16;
     int left = (int16_t)read_u16(frame + 4), top = (int16_t)read_u16(frame + 6);
     int width = read_u16(frame + 8), height = read_u16(frame + 10);
-    if (pet->face_left) left = -left - width;
+    bool mirrored = clawd_mirrored(pet);
+    if (mirrored) left = -left - width;
 
     size_t decoded_size = decode_clawd_runs(data_offset);
     int row = 0, col = 0;
@@ -432,7 +470,7 @@ static void draw_clawd_sprite(const clawd_view_t *pet, int x, int y, int pixel_s
             int count = remaining < width - col ? remaining : width - col;
             int dy = top + row;
             if (alpha && dy % pixel_step == 0) {
-                int start = left + (pet->face_left ? width - col - count : col);
+                int start = left + (mirrored ? width - col - count : col);
                 int first = ceil_div(start, pixel_step), after = ceil_div(start + count, pixel_step);
                 sprite_span(area, x + first, y + dy / pixel_step, after - first,
                             read_u16(run + 2), alpha);
@@ -469,6 +507,7 @@ static void draw_clawd(const lab_display_state_t *state)
 
 void app_ui_sleep_warning(uint16_t *buffer)
 {
+    sessions_clawd_pause(&sessions_clawd);
     begin_frame(buffer);
     const char *label = "Zzz...";
     text_at((WIDTH - text_width(label, UI_FONT_TITLE)) / 2, HEIGHT / 2 + 12, label, UI_FONT_TITLE, UI_TEXT);
@@ -476,15 +515,30 @@ void app_ui_sleep_warning(uint16_t *buffer)
 
 void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
 {
+    bool pet_requested = sessions_clawd_requests != state->app.sessions_clawd_requests;
+    sessions_clawd_requests = state->app.sessions_clawd_requests;
     begin_frame(buffer);
     if (state->app.choosing) {
+        sessions_clawd_pause(&sessions_clawd);
         draw_selector(&state->app);
         return;
     }
+    const codex_snapshot_t *snapshot = NULL;
     switch (state->app.current) {
-        case 0: draw_diagnostics(state); break;
-        case 1: draw_mouse(&state->app); break;
-        case JINTAI_CODEX_APP: draw_codex(state); break;
+        case JINTAI_INPUT_APP: draw_diagnostics(state); break;
+        case JINTAI_MOUSE_APP: draw_mouse(&state->app); break;
+        case JINTAI_CODEX_APP: snapshot = draw_codex(state); break;
         case JINTAI_CLAWD_APP: draw_clawd(state); break;
+    }
+    if (snapshot) {
+        enum { CAMEO_PIXEL_STEP = 2 };
+        const sprite_area_t stage = {UI_LEFT_MARGIN, UI_CONTENT_TOP, WIDTH, CONTENT_BOTTOM};
+        sessions_clawd_update(&sessions_clawd, snapshot, pet_requested, state->app.sessions_clawd_stick_x, state->now_ms);
+        const clawd_view_t *pet = &sessions_clawd.view;
+        int64_t duration = pet->pose == CLAWD_IDLE ? sessions_clawd.patrol_ends_ms - pet->pose_started_ms : 0;
+        int x = fit_clawd_x(pet, CAMEO_PIXEL_STEP, duration, &stage);
+        draw_clawd_sprite(pet, x, CONTENT_BOTTOM - 12, CAMEO_PIXEL_STEP, state->now_ms, &stage);
+    } else {
+        sessions_clawd_pause(&sessions_clawd);
     }
 }
