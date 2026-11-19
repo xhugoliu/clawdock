@@ -106,23 +106,27 @@ int main(void)
     input.buttons[0] = false; update(20);
     assert(manager.view.sessions_clawd_requests == 1 && !manager.view.codex_detail && manager.view.sessions_clawd_stick_x == 800);
     tap_sw(1);
+    assert(manager.view.sessions_clawd_requests == 2 && !manager.view.codex_detail);
+    tap_sw(2);
     assert(manager.view.codex_detail && manager.view.codex_page == 0 && manager.view.codex_id[0] == 3);
-    assert(manager.view.sessions_clawd_stick_x == 0);
+    assert(manager.view.sessions_clawd_stick_x == 800 && manager.view.sessions_clawd_requests == 2);
     input.joystick_x = 0;
     tap_sw(0);
-    assert(manager.view.sessions_clawd_requests == 1 && manager.view.codex_detail);
+    assert(manager.view.sessions_clawd_requests == 3 && manager.view.codex_detail);
     move(-800); assert(manager.view.codex_page == 0); /* Wait for the first page. */
     sessions.detail_pages = 3;
     move(-800); assert(manager.view.codex_page == 1);
     move(-800); assert(manager.view.codex_page == 2);
     move(-800); assert(manager.view.codex_page == 2);
     move(800); assert(manager.view.codex_page == 1);
+    tap_sw(1);
+    assert(manager.view.sessions_clawd_requests == 4 && manager.view.codex_detail && manager.view.codex_page == 1);
     open_selector(); assert(manager.view.codex_detail);
     release_chord(); update(20);
-    assert(manager.view.codex_detail && manager.view.codex_page == 1 && manager.view.sessions_clawd_requests == 1);
+    assert(manager.view.codex_detail && manager.view.codex_page == 1 && manager.view.sessions_clawd_requests == 4);
     tap_sw(2);
     assert(!manager.view.codex_detail && manager.view.codex_row == 1 && manager.view.codex_id[0] == 3);
-    tap_sw(1); assert(manager.view.codex_detail && manager.view.codex_page == 0);
+    tap_sw(2); assert(manager.view.codex_detail && manager.view.codex_page == 0);
     tap_sw(2);
 
     open_selector();
@@ -226,7 +230,7 @@ int main(void)
     assert(manager.view.codex_row == 0 && manager.view.codex_id[0] == 2);
     sessions.count = 0;
     update(20); assert(manager.view.codex_row == 0 && manager.view.codex_id[0] == 0);
-    tap_sw(1); assert(!manager.view.codex_detail);
+    tap_sw(2); assert(!manager.view.codex_detail);
 
     app_manager_wake(&manager);
     press_chord(); update(1000);

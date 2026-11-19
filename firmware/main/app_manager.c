@@ -48,13 +48,11 @@ void app_manager_wake(app_manager_t *manager)
 static void deliver_button(app_manager_t *m, unsigned button, bool pressed, int64_t now_ms)
 {
     if (m->view.current == JINTAI_CODEX_APP && pressed) {
-        if (button == 0 && !m->view.codex_detail) {
+        if (button < 2) {
             ++m->view.sessions_clawd_requests;
-        } else if (button == 1 && m->view.codex_has_selection && !m->view.codex_detail) {
-            m->view.codex_detail = true;
-            m->view.codex_page = 0;
-        } else if (button == 2) {
-            m->view.codex_detail = false;
+        } else if (button == 2 && (m->view.codex_detail || m->view.codex_has_selection)) {
+            m->view.codex_detail = !m->view.codex_detail;
+            if (m->view.codex_detail) m->view.codex_page = 0;
         }
     }
     if (m->view.current == JINTAI_CLAWD_APP && pressed) clawd_button(&m->clawd, button, now_ms);
@@ -231,7 +229,7 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
     if (m->chord_locked && switches_released(in)) m->chord_locked = false;
     if (m->view.current == JINTAI_CODEX_APP) {
         if (!m->chord_pending) navigate_codex(m, in);
-        if (!m->view.codex_detail && in->joystick_ready) m->view.sessions_clawd_stick_x = in->joystick_x;
+        if (in->joystick_ready) m->view.sessions_clawd_stick_x = in->joystick_x;
     }
     if (m->view.current == JINTAI_CLAWD_APP) {
         bool active = !m->chord_pending;

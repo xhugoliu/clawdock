@@ -12,6 +12,8 @@ static SemaphoreHandle_t lock;
 static codex_snapshot_t latest;
 static codex_detail_t latest_detail;
 static codex_decoder_t decoder;
+static int64_t last_contact_ms;
+static bool sources_unavailable;
 static int64_t clock_received_ms;
 static uint32_t clock_day_ms;
 static union {
@@ -51,6 +53,7 @@ static void receive_task(void *unused)
             if (frame == CODEX_FRAME_DETAIL) {
                 incoming.detail.received_ms = now_ms;
                 xSemaphoreTake(lock, portMAX_DELAY);
+                last_contact_ms = now_ms;
                 latest_detail = incoming.detail;
                 xSemaphoreGive(lock);
                 if (previous_page != incoming.detail.page || previous_pages != incoming.detail.pages) {
@@ -62,7 +65,9 @@ static void receive_task(void *unused)
             }
             incoming.list.received_ms = now_ms;
             xSemaphoreTake(lock, portMAX_DELAY);
-            latest = incoming.list;
+            last_contact_ms = now_ms;
+            sources_unavailable = !incoming.list.available;
+            if (incoming.list.available) latest = incoming.list;
             xSemaphoreGive(lock);
 
             int active = 0;
@@ -96,6 +101,7 @@ esp_err_t codex_uart_init(void)
 void codex_uart_request(const uint8_t *id, unsigned page, int64_t now_ms)
 {
     static int64_t next_request_ms;
+    static int64_t next_list_ms;
     static int64_t next_clock_request_ms;
     static bool was_detail;
     static unsigned last_page;
@@ -111,7 +117,9 @@ void codex_uart_request(const uint8_t *id, unsigned page, int64_t now_ms)
     was_detail = detail;
     last_page = page;
     next_request_ms = now_ms + 2000;
-    if (!detail) {
+    // Use a periodic request slot for the list. A page change always requests detail immediately.
+    if (!detail || (!changed && now_ms >= next_list_ms)) {
+        next_list_ms = now_ms + 4000;
         printf("JT_CODEX 4\n");
         return;
     }
@@ -133,11 +141,9 @@ void codex_uart_summary(codex_summary_t *out, const uint8_t *detail_id, int64_t 
     *out = (codex_summary_t){0};
     if (!lock) return;
     xSemaphoreTake(lock, portMAX_DELAY);
-    if (latest.received_ms && now_ms - latest.received_ms <= CODEX_TIMEOUT_MS) {
-        out->count = latest.count;
-        for (unsigned i = 0; i < out->count; ++i)
-            memcpy(out->ids[i], latest.rows[i].id, CODEX_ID_BYTES);
-    }
+    out->count = latest.count;
+    for (unsigned i = 0; i < out->count; ++i)
+        memcpy(out->ids[i], latest.rows[i].id, CODEX_ID_BYTES);
     if (detail_id && latest_detail.received_ms && now_ms - latest_detail.received_ms <= CODEX_TIMEOUT_MS &&
         memcmp(latest_detail.id, detail_id, CODEX_ID_BYTES) == 0) {
         out->detail_pages = latest_detail.pages;
@@ -145,13 +151,14 @@ void codex_uart_summary(codex_summary_t *out, const uint8_t *detail_id, int64_t 
     xSemaphoreGive(lock);
 }
 
-int64_t codex_uart_read(codex_snapshot_t *list, codex_detail_t *detail)
+int64_t codex_uart_read(codex_snapshot_t *list, codex_detail_t *detail, bool *unavailable)
 {
     if (!lock) return 0;
     xSemaphoreTake(lock, portMAX_DELAY);
     if (list) *list = latest;
     if (detail) *detail = latest_detail;
-    int64_t last_contact = latest.received_ms > latest_detail.received_ms ? latest.received_ms : latest_detail.received_ms;
+    if (unavailable) *unavailable = sources_unavailable;
+    int64_t last_contact = last_contact_ms;
     xSemaphoreGive(lock);
     return last_contact;
 }

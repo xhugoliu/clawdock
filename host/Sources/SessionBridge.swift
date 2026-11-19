@@ -73,10 +73,12 @@ private final class SessionFrameEncoder {
     private let titleWidth = 428
     private let titleHeight = 32
     private let previewHeight = 32
+    private let lineBaselineFromBottom: CGFloat = 6
     private let detailHeight = 320
+    private let detailContentHeight = 288
+    private let detailLineLimit = 8
     private let titleFont = CTFontCreateUIFontForLanguage(.system, 30, nil)!
-    private let previewFont = CTFontCreateUIFontForLanguage(.system, 27, nil)!
-    private let detailFont = CTFontCreateUIFontForLanguage(.system, 26, nil)!
+    private let replyFont = CTFontCreateUIFontForLanguage(.system, 27, nil)!
     private var titles: [String: Data] = [:]
     private var previews: [String: Data] = [:]
     private var detailText: String?
@@ -93,7 +95,7 @@ private final class SessionFrameEncoder {
             appendID(row.id, to: &payload)
             appendSession(row, to: &payload)
             if let reply = row.reply {
-                let pixels = previews[reply] ?? lineBitmap(reply, font: previewFont,
+                let pixels = previews[reply] ?? lineBitmap(reply, font: replyFont,
                                                            height: previewHeight, fitWithin: width)
                 previews[reply] = pixels
                 appendBitmap(pixels, to: &payload)
@@ -155,22 +157,37 @@ private final class SessionFrameEncoder {
         let fitted = CTLineCreateTruncatedLine(line, Double(lineWidth - 4), .end, ellipsis) ?? line
         return bitmap(height) { context in
             context.clip(to: CGRect(x: 0, y: 0, width: lineWidth, height: height))
-            context.textPosition = CGPoint(x: 2, y: 6)
+            context.textPosition = CGPoint(x: 2, y: lineBaselineFromBottom)
             CTLineDraw(fitted, context)
         }
     }
 
     private func detailBitmaps(_ text: String) -> [Data] {
-        let attributed = attributed(text, font: detailFont)
+        let attributed = attributed(text, font: replyFont)
         let setter = CTFramesetterCreateWithAttributedString(attributed)
-        let path = CGPath(rect: CGRect(x: 2, y: 2, width: width - 4, height: detailHeight - 4), transform: nil)
+        // Use the top of the fixed-size wire bitmap for the shorter page.
+        let bounds = CGRect(x: 2, y: detailHeight - detailContentHeight + 2,
+                            width: width - 4, height: detailContentHeight - 4)
+        let path = CGPath(rect: bounds, transform: nil)
+        let previewBaseline = CGFloat(detailHeight - previewHeight) + lineBaselineFromBottom
         var result: [Data] = []
         var offset = 0
         while offset < attributed.length, result.count < 24 {
-            let page = CTFramesetterCreateFrame(setter, CFRange(location: offset, length: 0), path, nil)
+            var page = CTFramesetterCreateFrame(setter, CFRange(location: offset, length: 0), path, nil)
+            let lines = CTFrameGetLines(page) as! [CTLine]
+            if lines.count > detailLineLimit {
+                let last = CTLineGetStringRange(lines[detailLineLimit - 1])
+                let length = last.location + last.length - offset
+                page = CTFramesetterCreateFrame(setter, CFRange(location: offset, length: length), path, nil)
+            }
             let visible = CTFrameGetVisibleStringRange(page)
             guard visible.length > 0 else { break }
-            result.append(bitmap(detailHeight) { CTFrameDraw(page, $0) })
+            var firstLine = CGPoint.zero
+            CTFrameGetLineOrigins(page, CFRange(location: 0, length: 1), &firstLine)
+            result.append(bitmap(detailHeight) { context in
+                context.translateBy(x: 0, y: previewBaseline - bounds.minY - firstLine.y)
+                CTFrameDraw(page, context)
+            })
             offset = visible.location + visible.length
         }
         return result.isEmpty ? [Data()] : result

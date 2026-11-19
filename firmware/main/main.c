@@ -41,7 +41,7 @@ static button_t buttons[] = {
 };
 
 static QueueHandle_t display_queue;
-static union {
+static struct {
     codex_snapshot_t list;
     codex_detail_t detail;
 } display_codex;
@@ -95,13 +95,11 @@ static void display_task(void *unused)
                         printf("display sleep canceled t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
                     }
                     if (state.app.current == JINTAI_CODEX_APP && !state.app.choosing) {
-                        if (state.app.codex_detail) {
-                            state.codex_detail = &display_codex.detail;
-                            state.codex_last_contact_ms = codex_uart_read(NULL, &display_codex.detail);
-                        } else {
-                            state.codex = &display_codex.list;
-                            state.codex_last_contact_ms = codex_uart_read(&display_codex.list, NULL);
-                        }
+                        state.codex = &display_codex.list;
+                        state.codex_detail = state.app.codex_detail ? &display_codex.detail : NULL;
+                        state.codex_last_contact_ms = codex_uart_read(&display_codex.list,
+                                                                     state.app.codex_detail ? &display_codex.detail : NULL,
+                                                                     &state.codex_sources_unavailable);
                     }
                     state.now_ms = esp_timer_get_time() / 1000;
                     if (state.app.current == JINTAI_CLAWD_APP && !state.app.choosing)
@@ -122,8 +120,7 @@ static void display_task(void *unused)
                 return;
             }
         }
-        bool show_clawd = state.app.current == JINTAI_CLAWD_APP ||
-                          (state.app.current == JINTAI_CODEX_APP && !state.app.codex_detail);
+        bool show_clawd = state.app.current == JINTAI_CLAWD_APP || state.app.current == JINTAI_CODEX_APP;
         bool clawd_active = state.awake && !state.sleep_warning && !state.app.choosing && show_clawd;
         vTaskDelayUntil(&last, pdMS_TO_TICKS(clawd_active ? 50 : 100));
     }

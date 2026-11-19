@@ -21,6 +21,7 @@ typedef struct {
     int64_t now_ms;
     int local_minute;
     int64_t codex_last_contact_ms;
+    bool codex_sources_unavailable;
 } lab_display_state_t;
 
 esp_err_t lab_display_init(void);

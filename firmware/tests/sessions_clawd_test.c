@@ -102,6 +102,17 @@ static void test_pet(void)
     assert((start_actions & (1U << pet.view.pose)) && pet.view.pose != last && pet.view.pose != previous);
 }
 
+static void test_waiting_for_mac(void)
+{
+    sessions_clawd_t pet = {0};
+    sessions_clawd_update(&pet, NULL, false, 0, 1000);
+    assert(pet.view.pose == CLAWD_SLEEPING);
+    sessions_clawd_update(&pet, NULL, true, 0, 1050);
+    assert(CLAWD_FUN_ACTIONS & (1U << pet.view.pose));
+    sessions_clawd_pause(&pet);
+    assert(!pet.last_update_ms && !pet.action_ends_ms);
+}
+
 static void test_manual_walk(void)
 {
     sessions_clawd_t pet = {0};
@@ -135,6 +146,7 @@ int main(void)
 {
     test_patrol();
     test_pet();
+    test_waiting_for_mac();
     test_manual_walk();
     const unsigned started = (1U << CLAWD_GROOVING) | (1U << CLAWD_JUGGLING) | (1U << CLAWD_EUREKA);
     const unsigned done = (1U << CLAWD_HAPPY) | (1U << CLAWD_COFFEE) | (1U << CLAWD_SNACK);

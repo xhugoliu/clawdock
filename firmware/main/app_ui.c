@@ -17,6 +17,7 @@ static sessions_clawd_t sessions_clawd;
 static unsigned sessions_clawd_requests;
 static const char apps_hint[] = "Apps: hold all 3 keys";
 static const char move_hint[] = "Stick: up / down";
+static const char pet_hint[] = "SW1/2: pet";
 
 extern const uint8_t ui_font_data[] __asm__("_binary_app_ui_font_bin_start");
 extern const uint8_t clawd_frames[] __asm__("_binary_clawd_frames_bin_start");
@@ -122,11 +123,11 @@ static void footer(const char *left, const char *center, const char *right)
     if (right) text_end(WIDTH, FOOTER_BASELINE, right, UI_FONT_HINT, UI_SECONDARY);
 }
 
-static void list_row(int y, int height, bool focused)
+static void list_row(int y, int height, int focus_y, bool focused)
 {
     enum { MARK_WIDTH = 3, MARK_HEIGHT = 24 };
     rect(UI_LEFT_MARGIN, y, CONTENT_WIDTH, height, focused ? UI_ENGAGED : UI_SURFACE);
-    if (focused) rect(UI_LEFT_MARGIN, y + (height - MARK_HEIGHT) / 2, MARK_WIDTH, MARK_HEIGHT, UI_ACCENT);
+    if (focused) rect(UI_LEFT_MARGIN, focus_y - MARK_HEIGHT / 2, MARK_WIDTH, MARK_HEIGHT, UI_ACCENT);
 }
 
 static void circle(int cx, int cy, int radius, uint16_t color)
@@ -205,7 +206,7 @@ static void draw_selector(const app_view_t *app)
     for (unsigned i = 0; i < JINTAI_APP_COUNT; ++i) {
         int y = UI_CONTENT_TOP + (int)i * (ROW_HEIGHT + UI_SPACE);
         int baseline = y + ROW_HEIGHT / 2 + 9;
-        list_row(y, ROW_HEIGHT, i == app->selected);
+        list_row(y, ROW_HEIGHT, y + ROW_HEIGHT / 2, i == app->selected);
         text_at(CONTENT_X, baseline, app_title(i), UI_FONT_BODY, UI_TEXT);
         if (i == app->current)
             text_end(WIDTH - UI_INSET, baseline, "Current app", UI_FONT_HINT, UI_SECONDARY);
@@ -282,86 +283,120 @@ static void codex_status(int right, int baseline, uint8_t status, int64_t now_ms
     }
 }
 
+static bool codex_is_offline(const lab_display_state_t *state)
+{
+    return state->codex_last_contact_ms && state->now_ms - state->codex_last_contact_ms > CODEX_TIMEOUT_MS;
+}
+
 static const char *codex_link_status(const lab_display_state_t *state)
 {
-    if (!state->codex_last_contact_ms) return "Waiting for Mac";
-    if (state->now_ms - state->codex_last_contact_ms > CODEX_TIMEOUT_MS) return "Mac is offline";
+    if (!state->codex_last_contact_ms) return "(Waiting for Mac)";
+    if (codex_is_offline(state)) return "(Mac is offline)";
+    if (state->codex_sources_unavailable) return "(Sources unavailable)";
     return NULL;
 }
 
-static void draw_codex_detail(const lab_display_state_t *state)
+enum {
+    SESSIONS_FIRST_ROW = UI_CONTENT_TOP + UI_SPACE,
+    SESSIONS_VISIBLE_ROWS = 3,
+    SESSION_ROW_HEIGHT = (CONTENT_BOTTOM - SESSIONS_FIRST_ROW - (SESSIONS_VISIBLE_ROWS - 1) * UI_SPACE) / SESSIONS_VISIBLE_ROWS,
+    SESSIONS_ROWS_HEIGHT = SESSIONS_VISIBLE_ROWS * SESSION_ROW_HEIGHT + (SESSIONS_VISIBLE_ROWS - 1) * UI_SPACE,
+    SESSION_TITLE_OFFSET = (SESSION_ROW_HEIGHT - CODEX_TITLE_HEIGHT - CODEX_PREVIEW_HEIGHT - UI_SPACE) / 2,
+    SESSION_REPLY_OFFSET = SESSION_TITLE_OFFSET + CODEX_TITLE_HEIGHT + UI_SPACE,
+};
+
+static void draw_codex_position(unsigned focus, unsigned count)
+{
+    char label[24];
+    snprintf(label, sizeof(label), "%u/%u", focus + 1, count);
+    text_end(WIDTH, UI_TITLE_BASELINE, label, UI_FONT_HINT, UI_SECONDARY);
+}
+
+static void draw_codex_card(const lab_display_state_t *state, int y, int height, bool focused,
+                            const codex_session_t *session)
+{
+    int title_y = y + SESSION_TITLE_OFFSET;
+    list_row(y, height, title_y + CODEX_TITLE_HEIGHT + UI_SPACE / 2, focused);
+    if (session) {
+        int64_t spinner_ms = codex_is_offline(state) ? state->codex_last_contact_ms + CODEX_TIMEOUT_MS : state->now_ms;
+        codex_bitmap(CONTENT_X, title_y, session->title, CODEX_TITLE_HEIGHT, UI_TEXT);
+        codex_status(WIDTH - UI_INSET, title_y + 25, session->state, spinner_ms);
+    }
+}
+
+static void draw_codex_detail(const lab_display_state_t *state, const codex_row_t *row, const char *status)
 {
     const codex_detail_t *detail = state->codex_detail;
-    const char *notice = codex_link_status(state);
-    if (!notice) {
-        if (!detail || !detail->received_ms || state->now_ms - detail->received_ms > CODEX_TIMEOUT_MS ||
-            memcmp(detail->id, state->app.codex_id, CODEX_ID_BYTES) != 0) notice = "Loading session";
-        else if (!detail->pages) notice = "Session unavailable";
+    const codex_session_t *session = row ? &row->session : NULL;
+    const uint8_t *reply = row && row->has_preview ? row->preview : NULL;
+    int height = CODEX_PREVIEW_HEIGHT;
+    const char *notice = !reply && !status ? "Loading session" : NULL;
+    unsigned pages = 0, page = 0;
+    if (detail && detail->received_ms && memcmp(detail->id, state->app.codex_id, CODEX_ID_BYTES) == 0) {
+        if (detail->pages) {
+            session = &detail->session;
+            pages = detail->pages;
+            page = detail->page;
+            const int space = SESSIONS_ROWS_HEIGHT - SESSION_REPLY_OFFSET;
+            height = space < CODEX_DETAIL_HEIGHT ? space : CODEX_DETAIL_HEIGHT;
+            reply = detail->has_reply ? detail->reply : NULL;
+            notice = reply ? NULL : "No reply yet";
+        } else if (!status) {
+            notice = "Session unavailable";
+        }
     }
+
+    const int reply_y = SESSIONS_FIRST_ROW + SESSION_REPLY_OFFSET;
+    draw_codex_card(state, SESSIONS_FIRST_ROW, SESSIONS_ROWS_HEIGHT, true, session);
     if (notice) {
-        page_title(app_title(state->app.current));
-        text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53, notice, UI_FONT_BODY, UI_TEXT);
-        footer("SW3: back", NULL, NULL);
+        int notice_y = SESSIONS_FIRST_ROW + (session ? SESSION_REPLY_OFFSET : SESSION_TITLE_OFFSET);
+        text_at(CONTENT_X, notice_y + 25, notice, UI_FONT_BODY, UI_SECONDARY);
+    } else if (reply) codex_bitmap(CONTENT_X, reply_y, reply, height, UI_SECONDARY);
+
+    char navigation[48];
+    if (pages > 1) snprintf(navigation, sizeof(navigation), "Page %u / %u  %s", page + 1, pages, move_hint);
+    footer(pet_hint, pages > 1 ? navigation : NULL, "SW3: preview");
+}
+
+static void draw_codex(const lab_display_state_t *state)
+{
+    const codex_snapshot_t *snapshot = state->codex;
+    unsigned count = snapshot && snapshot->available ? snapshot->count : 0;
+    unsigned focus = 0;
+    while (focus < count && memcmp(state->app.codex_id, snapshot->rows[focus].id, CODEX_ID_BYTES) != 0)
+        ++focus;
+
+    const char *title = app_title(JINTAI_CODEX_APP);
+    const char *status = codex_link_status(state);
+    page_title(title);
+    if (status) text_at(UI_LEFT_MARGIN + text_width(title, UI_FONT_TITLE) + UI_INSET,
+                        UI_TITLE_BASELINE, status, UI_FONT_HINT, UI_SECONDARY);
+    if (state->app.codex_detail) {
+        const codex_row_t *row = focus < count ? &snapshot->rows[focus] : NULL;
+        if (row) draw_codex_position(focus, count);
+        draw_codex_detail(state, row, status);
+        return;
+    }
+    if (!count) {
+        if (!status) text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53,
+                             snapshot && snapshot->received_ms ? "No active sessions" : "Loading sessions",
+                             UI_FONT_BODY, UI_TEXT);
+        footer(pet_hint, NULL, "Stick: left / right");
         return;
     }
 
-    codex_bitmap(UI_LEFT_MARGIN, 5, detail->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
-    codex_status(WIDTH, UI_TITLE_BASELINE, detail->session.state, state->now_ms);
+    if (focus == count) focus = state->app.codex_row < count ? state->app.codex_row : count - 1;
+    draw_codex_position(focus, count);
 
-    char page[24];
-    snprintf(page, sizeof(page), "Page %u / %u", state->app.codex_page + 1, detail->pages);
-    footer("SW3: back", detail->pages > 1 ? page : NULL, detail->pages > 1 ? move_hint : NULL);
-
-    rect(UI_LEFT_MARGIN, UI_CONTENT_TOP, CONTENT_WIDTH, CODEX_DETAIL_HEIGHT + 2 * UI_SPACE, UI_SURFACE);
-    if (detail->page != state->app.codex_page)
-        text_at(CONTENT_X, UI_CONTENT_TOP + 53, "Loading page", UI_FONT_BODY, UI_TEXT);
-    else if (!detail->has_reply) text_at(CONTENT_X, UI_CONTENT_TOP + 53, "No reply yet", UI_FONT_BODY, UI_TEXT);
-    else codex_bitmap(CONTENT_X, UI_CONTENT_TOP + UI_SPACE, detail->reply, CODEX_DETAIL_HEIGHT, UI_TEXT);
-}
-
-static const codex_snapshot_t *draw_codex(const lab_display_state_t *state)
-{
-    if (state->app.codex_detail) {
-        draw_codex_detail(state);
-        return NULL;
-    }
-    enum { FIRST_ROW = UI_CONTENT_TOP + UI_SPACE, VISIBLE_ROWS = 3,
-           ROW_HEIGHT = (CONTENT_BOTTOM - FIRST_ROW - (VISIBLE_ROWS - 1) * UI_SPACE) / VISIBLE_ROWS };
-    const codex_snapshot_t *snapshot = state->codex;
-
-    page_title(app_title(state->app.current));
-    const char *empty = codex_link_status(state);
-    if (!empty) {
-        if (!snapshot || !snapshot->received_ms || state->now_ms - snapshot->received_ms > CODEX_TIMEOUT_MS)
-            empty = "Loading sessions";
-        else if (!snapshot->available) empty = "Session sources unavailable";
-    }
-    if (empty || !snapshot->count) {
-        text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53, empty ? empty : "No active sessions", UI_FONT_BODY, UI_TEXT);
-        footer(empty ? apps_hint : "SW1: pet", NULL, empty ? NULL : "Stick: left / right");
-        return empty ? NULL : snapshot;
-    }
-
-    unsigned focus = state->app.codex_row < snapshot->count ? state->app.codex_row : snapshot->count - 1;
-    for (unsigned i = 0; i < snapshot->count; ++i)
-        if (memcmp(state->app.codex_id, snapshot->rows[i].id, CODEX_ID_BYTES) == 0) focus = i;
-    char label[24];
-    snprintf(label, sizeof(label), "%u/%u", focus + 1, snapshot->count);
-    text_end(WIDTH, UI_TITLE_BASELINE, label, UI_FONT_HINT, UI_SECONDARY);
-
-    unsigned first = focus >= VISIBLE_ROWS ? focus - (VISIBLE_ROWS - 1) : 0;
-    for (unsigned i = first; i < snapshot->count && i < first + VISIBLE_ROWS; ++i) {
-        int y = FIRST_ROW + (int)(i - first) * (ROW_HEIGHT + UI_SPACE);
+    unsigned first = focus >= SESSIONS_VISIBLE_ROWS ? focus - (SESSIONS_VISIBLE_ROWS - 1) : 0;
+    for (unsigned i = first; i < count && i < first + SESSIONS_VISIBLE_ROWS; ++i) {
+        int y = SESSIONS_FIRST_ROW + (int)(i - first) * (SESSION_ROW_HEIGHT + UI_SPACE);
         const codex_row_t *row = &snapshot->rows[i];
-        int title_y = y + (ROW_HEIGHT - CODEX_TITLE_HEIGHT - CODEX_PREVIEW_HEIGHT - UI_SPACE) / 2;
-        list_row(y, ROW_HEIGHT, focus == i);
-        codex_bitmap(CONTENT_X, title_y, row->session.title, CODEX_TITLE_HEIGHT, UI_TEXT);
-        codex_status(WIDTH - UI_INSET, title_y + 25, row->session.state, state->now_ms);
+        draw_codex_card(state, y, SESSION_ROW_HEIGHT, focus == i, &row->session);
         if (row->has_preview)
-            codex_bitmap(CONTENT_X, title_y + CODEX_TITLE_HEIGHT + UI_SPACE, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
+            codex_bitmap(CONTENT_X, y + SESSION_REPLY_OFFSET, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
     }
-    footer("SW1: pet", "SW2: details", snapshot->count > 1 ? "Stick: move / browse" : "Stick: left / right");
-    return snapshot;
+    footer(pet_hint, "SW3: details", snapshot->count > 1 ? "Stick: move / browse" : "Stick: left / right");
 }
 
 static unsigned read_u16(const uint8_t *bytes)
@@ -523,17 +558,16 @@ void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
         draw_selector(&state->app);
         return;
     }
-    const codex_snapshot_t *snapshot = NULL;
     switch (state->app.current) {
         case JINTAI_INPUT_APP: draw_diagnostics(state); break;
         case JINTAI_MOUSE_APP: draw_mouse(&state->app); break;
-        case JINTAI_CODEX_APP: snapshot = draw_codex(state); break;
+        case JINTAI_CODEX_APP: draw_codex(state); break;
         case JINTAI_CLAWD_APP: draw_clawd(state); break;
     }
-    if (snapshot) {
+    if (state->app.current == JINTAI_CODEX_APP) {
         enum { CAMEO_PIXEL_STEP = 2 };
         const sprite_area_t stage = {UI_LEFT_MARGIN, UI_CONTENT_TOP, WIDTH, CONTENT_BOTTOM};
-        sessions_clawd_update(&sessions_clawd, snapshot, pet_requested, state->app.sessions_clawd_stick_x, state->now_ms);
+        sessions_clawd_update(&sessions_clawd, state->codex, pet_requested, state->app.sessions_clawd_stick_x, state->now_ms);
         const clawd_view_t *pet = &sessions_clawd.view;
         int64_t duration = pet->pose == CLAWD_IDLE ? sessions_clawd.patrol_ends_ms - pet->pose_started_ms : 0;
         int x = fit_clawd_x(pet, CAMEO_PIXEL_STEP, duration, &stage);

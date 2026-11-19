@@ -9,14 +9,21 @@
 **会话列表与详情**
 
 <p>
-  <a href="docs/screenshots/sessions.png"><img src="docs/screenshots/sessions.png" width="49%" alt="会话列表显示会话状态、回复摘要和巡游的 Clawd"></a>
-  <a href="docs/screenshots/session-detail.png"><img src="docs/screenshots/session-detail.png" width="49%" alt="会话详情显示最近一条回复"></a>
+  <a href="docs/screenshots/sessions.png"><img src="docs/screenshots/sessions.png" width="49%" alt="Sessions 列表显示三张会话卡片，Clawd 在右下角吃饼干"></a>
+  <a href="docs/screenshots/session-detail.png"><img src="docs/screenshots/session-detail.png" width="49%" alt="按 SW3 展开选中的会话卡片，显示八行正文和页码，Clawd 举起灯泡"></a>
+</p>
+
+**掉线与等待连接**
+
+<p>
+  <a href="docs/screenshots/sessions-offline.png"><img src="docs/screenshots/sessions-offline.png" width="49%" alt="Sessions 页头显示 Mac is offline，保留三张会话卡片，Clawd 戴着耳机"></a>
+  <a href="docs/screenshots/sessions-waiting.png"><img src="docs/screenshots/sessions-waiting.png" width="49%" alt="Sessions 页头显示 Waiting for Mac，Clawd 在底部中央打盹"></a>
 </p>
 
 **Clawd 桌宠与应用选择器**
 
 <p>
-  <a href="docs/screenshots/clawd.png"><img src="docs/screenshots/clawd.png" width="49%" alt="Clawd 桌宠和右上角的本地时钟"></a>
+  <a href="docs/screenshots/clawd.png"><img src="docs/screenshots/clawd.png" width="49%" alt="Clawd 戴着星星帽，右上角显示本地时间"></a>
   <a href="docs/screenshots/app-picker.png"><img src="docs/screenshots/app-picker.png" width="49%" alt="应用选择器列出四个内置应用"></a>
 </p>
 

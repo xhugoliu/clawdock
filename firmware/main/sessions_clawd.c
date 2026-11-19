@@ -38,13 +38,14 @@ static void set_patrol_pose(sessions_clawd_t *clawd, clawd_pose_t pose, int64_t 
 
 void sessions_clawd_pause(sessions_clawd_t *clawd)
 {
-    if (!clawd->last_snapshot_ms) return;
+    if (!clawd->last_update_ms) return;
     memset(clawd->sessions, 0, sizeof(clawd->sessions));
     clawd->last_snapshot_ms = 0;
     clawd->last_update_ms = 0;
     clawd->action_ends_ms = 0;
     clawd->patrol_ends_ms = 0;
     clawd->pending = SESSIONS_CLAWD_NONE;
+    clawd->running = false;
     clawd->pet_pending = false;
 }
 
@@ -106,7 +107,7 @@ static bool walk(sessions_clawd_t *clawd, int speed, int elapsed, int64_t now_ms
 void sessions_clawd_update(sessions_clawd_t *clawd, const codex_snapshot_t *snapshot,
                            bool pet_requested, int stick_x, int64_t now_ms)
 {
-    if (clawd->last_snapshot_ms != snapshot->received_ms) read_snapshot(clawd, snapshot);
+    if (snapshot && clawd->last_snapshot_ms != snapshot->received_ms) read_snapshot(clawd, snapshot);
 
     int64_t elapsed = clawd->last_update_ms ? now_ms - clawd->last_update_ms : 0;
     clawd->last_update_ms = now_ms;

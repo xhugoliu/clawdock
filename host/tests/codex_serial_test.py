@@ -102,6 +102,11 @@ def detail(master, ident, page):
     return actual, total, text
 
 
+def count_bitmap_lines(pixels):
+    rows = [any(pixels[offset:offset + width_bytes]) for offset in range(0, len(pixels), width_bytes)]
+    return sum(current and not previous for previous, current in zip([False] + rows, rows))
+
+
 with tempfile.TemporaryDirectory() as temp:
     home = Path(temp)
     old = home / 'sessions/2026/01/01'
@@ -154,9 +159,11 @@ with tempfile.TemporaryDirectory() as temp:
         assert poll(master)[running][2] == rows[running][2], 'private message replaced the reply'
         page0, total, pixels0 = detail(master, running, 0)
         page1, total_again, pixels1 = detail(master, running, 1)
-        assert page0 == 0 and page1 == 1 and total > 1 and total_again == total
-        assert any(pixels0) and any(pixels1) and pixels0 != pixels1
-        assert detail(master, running, 255)[:2] == (total - 1, total)
+        assert page0 == 0 and page1 == 1 and total == total_again == 4
+        assert count_bitmap_lines(pixels0) == count_bitmap_lines(pixels1) == 8 and pixels0 != pixels1
+        assert count_bitmap_lines(detail(master, running, 2)[2]) == 8
+        last_page, last_total, last_pixels = detail(master, running, 255)
+        assert (last_page, last_total) == (total - 1, total) and count_bitmap_lines(last_pixels) == 4
         assert detail(master, other, 0) == (0, 1, bytearray())
         assert detail(master, uuid.uuid4(), 0) == (0, 0, None)
 
@@ -169,6 +176,9 @@ with tempfile.TemporaryDirectory() as temp:
         completed = poll(master)
         assert {key: value[0] for key, value in completed.items()} == {running: 2, other: 1, long_running: 1}
         assert any(completed[running][2]) and completed[running][2] != rows[running][2]
+        preview = completed[running][2]
+        _, _, completed_reply = detail(master, running, 0)
+        assert completed_reply[:len(preview)] == preview, 'detail and preview should draw the reply at the same baseline'
         with second.open('ab') as file:
             file.write(interrupted[30:])
         assert {key: value[0] for key, value in poll(master).items()} == {running: 2, other: 4, long_running: 1}

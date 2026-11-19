@@ -22,7 +22,7 @@ host/start-mouse-bridge.sh
 
 ## 会话监看
 
-在近台菜单中勾选“启用会话监看”，设备端进入 `SESSIONS`。近台合并 Codex、OpenCode、Claude Code 和 Pi 的本机会话，使用会话原有标题。运行中的会话优先，近台观察到的已结束轮次保留 60 秒。Mac 把标题和最近一条可见回复渲染为位图，详情最多显示约 2400 字符。会话监看无需辅助功能授权。[设备端操作](../firmware/README.md#会话监看)
+在近台菜单中勾选“启用会话监看”，设备端进入 `SESSIONS`。近台合并 Codex、OpenCode、Claude Code 和 Pi 的本机会话，使用会话原有标题。运行中的会话优先，近台观察到的已结束轮次保留 60 秒。Mac 将标题和最近一条可见回复渲染为位图，回复保留约 2400 个字符。预览和详情正文统一使用 27 px，详情最多 24 页，每页最多 8 行。会话监看无需辅助功能授权。[设备端操作](../firmware/README.md#会话监看)
 
 - **Codex** 自动读取 `~/.codex/sessions` 和 `session_index.jsonl`，也支持启动环境中的 `CODEX_HOME`。标题索引缺失时显示项目目录名。运行记录超过 10 分钟没有新状态信号会退出列表。
 - **OpenCode 2.x** 自动发现 `~/.local/state/opencode/service.json` 注册的本机服务，也支持启动环境中的 `XDG_STATE_HOME`。通过服务的只读会话 API 获取状态和回复。默认共享服务内的会话可以显示。以 `--standalone` 启动的独立服务超出这一发现范围。 [OpenCode API](https://opencode.ai/docs/api)
@@ -43,7 +43,7 @@ Claude Code 和 Pi 的 hooks 在 `~/Library/Caches/com.jintai.host/sessions` 下
 - `Sources/SerialDevices.swift` 发现兼容串口，`SerialConnection.swift` 负责读取和断线处理。
 - `Sources/BridgeProtocol.swift` 负责拆分串口消息；应用按 `BridgeModule` 将消息分发给各功能模块，鼠标实现位于 `MouseBridge.swift`。
 - 设备通过 `JT_TIME 1` 请求校时，Mac 返回当前时区的本地时间，供 Clawd 显示。关闭会话监看时也可以校时。
-- `Sources/AgentSessions.swift` 合并会话来源，`SessionBridge.swift` 响应固件的 `JT_CODEX 4` 请求，通过同一串口发送带 CRC 的 `JCX4` 列表或详情页。设备约每 2 秒同步一次，切换视图或翻页时立即请求，8 秒无有效快照后显示离线。
+- `Sources/AgentSessions.swift` 合并会话来源，`SessionBridge.swift` 响应固件的 `JT_CODEX 4` 请求，通过同一串口发送带 CRC 的 `JCX4` 列表或详情页。设备通常每 2 秒发起一次请求，停留在详情时交替刷新列表和当前页，切换视图或翻页时立即请求。超过 8 秒未收到会话数据后，设备显示离线状态并继续显示上次收到的内容。
 - `Sources/MenuBarApp.swift` 管理菜单、权限状态和设备选择；`main.swift` 提供应用入口及测试入口。
 
 ```sh
