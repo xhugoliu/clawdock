@@ -8,8 +8,9 @@ enum {
     MANUAL_WALK_SPEED = 150,
     STICK_THRESHOLD = 140,
     WALK_HALF_WIDTH = 60,
-    LEFT_END = UI_LEFT_MARGIN + WALK_HALF_WIDTH,
-    RIGHT_END = UI_WIDTH - WALK_HALF_WIDTH,
+    LEFT_END = (UI_LEFT_MARGIN + WALK_HALF_WIDTH) * PIXEL_UNIT,
+    RIGHT_END = (UI_WIDTH - WALK_HALF_WIDTH) * PIXEL_UNIT,
+    SLEEP_CENTER = UI_WIDTH / 2 * PIXEL_UNIT,
 };
 
 static const unsigned preferred_actions[] = {
@@ -90,18 +91,16 @@ static void read_snapshot(sessions_clawd_t *clawd, const codex_snapshot_t *snaps
     }
 }
 
-static bool walk(sessions_clawd_t *clawd, int speed, int elapsed, int64_t now_ms)
+static bool walk(sessions_clawd_t *clawd, int speed, int target, int elapsed, int64_t now_ms)
 {
-    const int left = LEFT_END * PIXEL_UNIT, right = RIGHT_END * PIXEL_UNIT;
     int position = clawd->position_millipixels;
     int next = position + speed * elapsed;
-    if (next < left) next = left;
-    if (next > right) next = right;
+    if (speed < 0 ? next < target : next > target) next = target;
     if (clawd->view.pose != CLAWD_WALKING) set_pose(clawd, CLAWD_WALKING, now_ms);
     clawd->view.face_left = speed < 0;
     clawd->position_millipixels = next;
     clawd->view.x = next / PIXEL_UNIT;
-    return next != position && (next == left || next == right);
+    return next != position && next == target;
 }
 
 void sessions_clawd_update(sessions_clawd_t *clawd, const codex_snapshot_t *snapshot,
@@ -113,15 +112,16 @@ void sessions_clawd_update(sessions_clawd_t *clawd, const codex_snapshot_t *snap
     clawd->last_update_ms = now_ms;
     if (elapsed < 0 || elapsed > 150) elapsed = 0;
     if (!clawd->position_millipixels) {
-        clawd->position_millipixels = LEFT_END * PIXEL_UNIT;
-        clawd->view.x = LEFT_END;
+        clawd->position_millipixels = LEFT_END;
+        clawd->view.x = LEFT_END / PIXEL_UNIT;
     }
 
     if (pet_requested) clawd->pet_pending = true;
     if (stick_x <= -STICK_THRESHOLD || stick_x >= STICK_THRESHOLD) {
         clawd->action_ends_ms = 0;
         clawd->patrol_ends_ms = 0;
-        walk(clawd, stick_x * MANUAL_WALK_SPEED / 1000, elapsed, now_ms);
+        int speed = stick_x * MANUAL_WALK_SPEED / 1000;
+        walk(clawd, speed, speed < 0 ? LEFT_END : RIGHT_END, elapsed, now_ms);
         return;
     }
 
@@ -137,23 +137,23 @@ void sessions_clawd_update(sessions_clawd_t *clawd, const codex_snapshot_t *snap
         return;
     }
 
-    int left = LEFT_END * PIXEL_UNIT, right = RIGHT_END * PIXEL_UNIT;
     int position = clawd->position_millipixels;
-    if (clawd->running) {
-        if (!clawd->patrol_ends_ms) set_patrol_pose(clawd, CLAWD_WALKING, now_ms);
-        else if (now_ms >= clawd->patrol_ends_ms)
-            set_patrol_pose(clawd, clawd->view.pose == CLAWD_WALKING ? CLAWD_IDLE : CLAWD_WALKING, now_ms);
-        if (clawd->view.pose == CLAWD_IDLE) return;
-    } else {
+    if (!clawd->running) {
         clawd->patrol_ends_ms = 0;
-        if (position == left || position == right) {
-            if (clawd->view.pose != CLAWD_SLEEPING) set_pose(clawd, CLAWD_SLEEPING, now_ms);
-            return;
+        if (position != SLEEP_CENTER) {
+            int speed = position < SLEEP_CENTER ? WALK_SPEED : -WALK_SPEED;
+            if (!walk(clawd, speed, SLEEP_CENTER, elapsed, now_ms)) return;
         }
-        if (clawd->view.pose != CLAWD_WALKING) set_pose(clawd, CLAWD_WALKING, now_ms);
+        if (clawd->view.pose != CLAWD_SLEEPING) set_pose(clawd, CLAWD_SLEEPING, now_ms);
+        return;
     }
 
-    bool leftward = position >= right || (position > left && clawd->view.face_left);
-    bool at_end = walk(clawd, leftward ? -WALK_SPEED : WALK_SPEED, elapsed, now_ms);
-    if (clawd->running && at_end) set_patrol_pose(clawd, CLAWD_IDLE, now_ms);
+    if (!clawd->patrol_ends_ms) set_patrol_pose(clawd, CLAWD_WALKING, now_ms);
+    else if (now_ms >= clawd->patrol_ends_ms)
+        set_patrol_pose(clawd, clawd->view.pose == CLAWD_WALKING ? CLAWD_IDLE : CLAWD_WALKING, now_ms);
+    if (clawd->view.pose == CLAWD_IDLE) return;
+
+    bool leftward = position >= RIGHT_END || (position > LEFT_END && clawd->view.face_left);
+    bool at_end = walk(clawd, leftward ? -WALK_SPEED : WALK_SPEED, leftward ? LEFT_END : RIGHT_END, elapsed, now_ms);
+    if (at_end) set_patrol_pose(clawd, CLAWD_IDLE, now_ms);
 }

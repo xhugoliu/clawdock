@@ -76,7 +76,7 @@ static void test_pet(void)
     sessions_clawd_t pet = {0};
     codex_snapshot_t sessions = { .available = true, .received_ms = 1000 };
     sessions_clawd_update(&pet, &sessions, false, 0, 1000);
-    assert(pet.view.pose == CLAWD_SLEEPING);
+    assert(pet.view.pose == CLAWD_WALKING);
     int x = pet.view.x;
 
     unsigned seen = 0;
@@ -105,9 +105,26 @@ static void test_pet(void)
 static void test_waiting_for_mac(void)
 {
     sessions_clawd_t pet = {0};
+    const int center = UI_WIDTH / 2;
     sessions_clawd_update(&pet, NULL, false, 0, 1000);
-    assert(pet.view.pose == CLAWD_SLEEPING);
-    sessions_clawd_update(&pet, NULL, true, 0, 1050);
+    assert(pet.view.pose == CLAWD_WALKING && pet.view.x < center && !pet.view.face_left);
+    for (int64_t now = 1050; now <= 7000; now += 50) {
+        sessions_clawd_update(&pet, NULL, false, 0, now);
+        assert(pet.view.x <= center);
+    }
+    assert(pet.view.pose == CLAWD_SLEEPING && pet.view.x == center);
+
+    sessions_clawd_update(&pet, NULL, false, 1000, 7100);
+    assert(pet.view.pose == CLAWD_WALKING && pet.view.x > center && !pet.view.face_left);
+    sessions_clawd_update(&pet, NULL, false, 0, 7150);
+    assert(pet.view.pose == CLAWD_WALKING && pet.view.x > center && pet.view.face_left);
+    for (int64_t now = 7200; now <= 7500; now += 50) {
+        sessions_clawd_update(&pet, NULL, false, 0, now);
+        assert(pet.view.x >= center);
+    }
+    assert(pet.view.pose == CLAWD_SLEEPING && pet.view.x == center);
+
+    sessions_clawd_update(&pet, NULL, true, 0, 7550);
     assert(CLAWD_FUN_ACTIONS & (1U << pet.view.pose));
     sessions_clawd_pause(&pet);
     assert(!pet.last_update_ms && !pet.action_ends_ms);
@@ -118,7 +135,7 @@ static void test_manual_walk(void)
     sessions_clawd_t pet = {0};
     codex_snapshot_t sessions = { .available = true, .received_ms = 1000 };
     sessions_clawd_update(&pet, &sessions, false, 139, 1000);
-    assert(pet.view.pose == CLAWD_SLEEPING);
+    assert(pet.view.pose == CLAWD_WALKING && pet.view.x == UI_LEFT_MARGIN + 60);
     int left = pet.view.x;
     sessions_clawd_update(&pet, &sessions, false, 1000, 1100);
     assert(pet.view.pose == CLAWD_WALKING && pet.view.x == left + 15 && !pet.view.face_left);
@@ -154,8 +171,9 @@ int main(void)
     const unsigned cancelled = (1U << CLAWD_HAT) | (1U << CLAWD_GROOVING) | (1U << CLAWD_SNACK);
 
     publish();
-    assert(clawd.view.pose == CLAWD_SLEEPING);
-    int left = clawd.view.x;
+    const int center = UI_WIDTH / 2;
+    for (unsigned i = 0; i < 120 && clawd.view.pose != CLAWD_SLEEPING; ++i) update(50);
+    assert(clawd.view.pose == CLAWD_SLEEPING && clawd.view.x == center);
     snapshot.count = 2;
     row(0, 1, CODEX_RUNNING);
     row(1, 2, CODEX_RUNNING);
@@ -165,9 +183,9 @@ int main(void)
     publish();
     assert(clawd.view.pose_started_ms == playing_since && clawd.pending == SESSIONS_CLAWD_NONE);
     update(clawd_action_duration(first));
-    assert(clawd.view.pose == CLAWD_WALKING && clawd.view.x == left);
+    assert(clawd.view.pose == CLAWD_WALKING && clawd.view.x == center);
     update(50);
-    assert(clawd.view.x > left && !clawd.view.face_left);
+    assert(clawd.view.x > center && !clawd.view.face_left);
 
     /* Reordering the same rows and introducing an already completed row do not make events. */
     snapshot.count = 3;
@@ -205,17 +223,16 @@ int main(void)
     publish();
     assert(clawd.view.pose_started_ms == playing_since && clawd.pending == SESSIONS_CLAWD_NONE);
     update(clawd_action_duration(third));
-    for (unsigned i = 0; i < 240 && clawd.view.pose != CLAWD_SLEEPING; ++i) update(50);
-    assert(clawd.view.pose == CLAWD_SLEEPING && clawd.view.x > left);
-    int right = clawd.view.x;
+    for (unsigned i = 0; i < 120 && clawd.view.pose != CLAWD_SLEEPING; ++i) update(50);
+    assert(clawd.view.pose == CLAWD_SLEEPING && clawd.view.x == center);
 
     /* The first snapshot after reopening seeds the session history. */
     sessions_clawd_pause(&clawd);
     row(0, 4, CODEX_RUNNING);
     publish();
-    assert(clawd.view.pose == CLAWD_WALKING && clawd.view.x == right);
+    assert(clawd.view.pose == CLAWD_WALKING && clawd.view.x == center);
     update(50);
-    assert(clawd.view.x < right && clawd.view.face_left);
+    assert(clawd.view.x < center && clawd.view.face_left);
     row(0, 4, CODEX_CANCELLED);
     now_ms += 50;
     publish();
