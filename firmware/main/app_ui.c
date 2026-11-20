@@ -417,6 +417,10 @@ static unsigned read_u16(const uint8_t *bytes)
 typedef struct { int left, top, right, bottom; } sprite_area_t;
 
 enum { CLAWD_RUN_BYTES = 4, CLAWD_CLIP_BYTES = 6, CLAWD_FRAME_BYTES = 12 };
+enum {
+    CLAWD_SOURCE_BODY_COLOR = UI_RGB565(222, 136, 109),
+    CLAWD_PANEL_BODY_COLOR = UI_RGB565(230, 119, 77),
+};
 static uint8_t clawd_runs[24 * 1024];
 
 static size_t decode_clawd_runs(uint32_t offset)
@@ -494,7 +498,7 @@ static int fit_clawd_x(const clawd_view_t *pet, int pixel_step, int64_t duration
 }
 
 static void draw_clawd_sprite(const clawd_view_t *pet, int x, int y, int pixel_step, int64_t now_ms,
-                              const sprite_area_t *area)
+                              const sprite_area_t *area, uint16_t body_color)
 {
     const uint8_t *clip = clawd_frames + pet->pose * CLAWD_CLIP_BYTES;
     int64_t elapsed = now_ms > pet->pose_started_ms ? now_ms - pet->pose_started_ms : 0;
@@ -510,6 +514,8 @@ static void draw_clawd_sprite(const clawd_view_t *pet, int x, int y, int pixel_s
     int row = 0, col = 0;
     for (const uint8_t *run = clawd_runs; row < height && run < clawd_runs + decoded_size; run += CLAWD_RUN_BYTES) {
         unsigned alpha = run[1];
+        uint16_t color = read_u16(run + 2);
+        if (color == CLAWD_SOURCE_BODY_COLOR) color = body_color;
         int remaining = run[0];
         while (remaining && row < height) {
             int count = remaining < width - col ? remaining : width - col;
@@ -517,8 +523,7 @@ static void draw_clawd_sprite(const clawd_view_t *pet, int x, int y, int pixel_s
             if (alpha && dy % pixel_step == 0) {
                 int start = left + (mirrored ? width - col - count : col);
                 int first = ceil_div(start, pixel_step), after = ceil_div(start + count, pixel_step);
-                sprite_span(area, x + first, y + dy / pixel_step, after - first,
-                            read_u16(run + 2), alpha);
+                sprite_span(area, x + first, y + dy / pixel_step, after - first, color, alpha);
             }
             remaining -= count;
             col += count;
@@ -530,7 +535,7 @@ static void draw_clawd_sprite(const clawd_view_t *pet, int x, int y, int pixel_s
     }
 }
 
-static void draw_clawd(const lab_display_state_t *state)
+static void draw_clawd(const lab_display_state_t *state, uint16_t body_color)
 {
     const sprite_area_t stage = {UI_LEFT_MARGIN, UI_CONTENT_TOP - UI_INSET, WIDTH, FOOTER_BASELINE - 56};
     const clawd_view_t *pet = &state->app.clawd;
@@ -544,7 +549,7 @@ static void draw_clawd(const lab_display_state_t *state)
     }
     page_title(app_title(JINTAI_CLAWD_APP));
     text_end(WIDTH - UI_INSET, UI_TITLE_BASELINE, clock, UI_FONT_TITLE, UI_TEXT);
-    draw_clawd_sprite(pet, pet->x, pet->y, 1, state->now_ms, &stage);
+    draw_clawd_sprite(pet, pet->x, pet->y, 1, state->now_ms, &stage, body_color);
     text_at(UI_LEFT_MARGIN, FOOTER_BASELINE - 32, "Stick: move", UI_FONT_HINT, UI_SECONDARY);
     footer("SW1-SW3 / tap Clawd: action", NULL,
            pet->pose == CLAWD_SLEEPING ? "Stick press: wake" : "Stick press: sleep");
@@ -558,7 +563,7 @@ void app_ui_sleep_warning(uint16_t *buffer)
     text_at((WIDTH - text_width(label, UI_FONT_TITLE)) / 2, HEIGHT / 2 + 12, label, UI_FONT_TITLE, UI_TEXT);
 }
 
-void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
+static void render(uint16_t *buffer, const lab_display_state_t *state, uint16_t clawd_body_color)
 {
     bool pet_requested = sessions_clawd_requests != state->app.sessions_clawd_requests;
     sessions_clawd_requests = state->app.sessions_clawd_requests;
@@ -572,7 +577,7 @@ void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
         case JINTAI_INPUT_APP: draw_diagnostics(state); break;
         case JINTAI_MOUSE_APP: draw_mouse(&state->app); break;
         case JINTAI_CODEX_APP: draw_codex(state); break;
-        case JINTAI_CLAWD_APP: draw_clawd(state); break;
+        case JINTAI_CLAWD_APP: draw_clawd(state, clawd_body_color); break;
     }
     if (state->app.current == JINTAI_CODEX_APP) {
         enum { CAMEO_PIXEL_STEP = 2 };
@@ -581,8 +586,19 @@ void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
         const clawd_view_t *pet = &sessions_clawd.view;
         int64_t duration = pet->pose == CLAWD_IDLE ? sessions_clawd.patrol_ends_ms - pet->pose_started_ms : 0;
         int x = fit_clawd_x(pet, CAMEO_PIXEL_STEP, duration, &stage);
-        draw_clawd_sprite(pet, x, CONTENT_BOTTOM - 12, CAMEO_PIXEL_STEP, state->now_ms, &stage);
+        draw_clawd_sprite(pet, x, CONTENT_BOTTOM - 12, CAMEO_PIXEL_STEP, state->now_ms,
+                          &stage, clawd_body_color);
     } else {
         sessions_clawd_pause(&sessions_clawd);
     }
+}
+
+void app_ui_render(uint16_t *buffer, const lab_display_state_t *state)
+{
+    render(buffer, state, CLAWD_SOURCE_BODY_COLOR);
+}
+
+void app_ui_render_for_panel(uint16_t *buffer, const lab_display_state_t *state)
+{
+    render(buffer, state, CLAWD_PANEL_BODY_COLOR);
 }

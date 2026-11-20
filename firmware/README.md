@@ -131,6 +131,12 @@ python3 -m playwright install chromium
 python3 firmware/scripts/build_clawd_frames.py
 ```
 
+### Clawd 屏幕颜色对比
+
+屏幕测试在固定背光和姿势下对比四种主体橙色。1 号 `#DE886D` 用于主 README 的预览，2 号 `#E6774D` 用于实机。3 号和 4 号展示更高的饱和度。
+
+![Clawd 主体颜色对比，2 号为实机采用的 #E6774D](../docs/screenshots/clawd-color-comparison.png)
+
 ## 第三方代码与素材
 
 - **ST7701** · MIPI 驱动与面板初始化包含 HachimoDock 的 Apache-2.0 组件。[驱动来源](components/st7701/NOTICE.md) · [许可证](components/st7701/LICENSE)

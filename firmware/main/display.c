@@ -142,6 +142,6 @@ esp_err_t lab_display_set_awake(bool awake)
 esp_err_t lab_display_update(const lab_display_state_t *state)
 {
     if (!fb || !state) return ESP_ERR_INVALID_STATE;
-    app_ui_render(fb, state);
+    app_ui_render_for_panel(fb, state);
     return submit_frame();
 }
