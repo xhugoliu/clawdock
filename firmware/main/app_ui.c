@@ -303,7 +303,13 @@ enum {
     SESSIONS_ROWS_HEIGHT = SESSIONS_VISIBLE_ROWS * SESSION_ROW_HEIGHT + (SESSIONS_VISIBLE_ROWS - 1) * UI_SPACE,
     SESSION_TITLE_OFFSET = (SESSION_ROW_HEIGHT - CODEX_TITLE_HEIGHT - CODEX_PREVIEW_HEIGHT - UI_SPACE) / 2,
     SESSION_REPLY_OFFSET = SESSION_TITLE_OFFSET + CODEX_TITLE_HEIGHT + UI_SPACE,
+    SESSION_REPLY_BASELINE = CODEX_PREVIEW_HEIGHT - 6, // Matches the Mac's reply bitmaps.
 };
+
+static const char *codex_reply_placeholder(const codex_session_t *session)
+{
+    return session->state == CODEX_RUNNING ? "Waiting for a reply" : "No reply available";
+}
 
 static void draw_codex_position(unsigned focus, unsigned count)
 {
@@ -330,7 +336,7 @@ static void draw_codex_detail(const lab_display_state_t *state, const codex_row_
     const codex_session_t *session = row ? &row->session : NULL;
     const uint8_t *reply = row && row->has_preview ? row->preview : NULL;
     int height = CODEX_PREVIEW_HEIGHT;
-    const char *notice = !reply && !status ? "Loading session" : NULL;
+    const char *notice = !session && !status ? "Loading session" : NULL;
     unsigned pages = 0, page = 0;
     if (detail && detail->received_ms && memcmp(detail->id, state->app.codex_id, CODEX_ID_BYTES) == 0) {
         if (detail->pages) {
@@ -340,7 +346,7 @@ static void draw_codex_detail(const lab_display_state_t *state, const codex_row_
             const int space = SESSIONS_ROWS_HEIGHT - SESSION_REPLY_OFFSET;
             height = space < CODEX_DETAIL_HEIGHT ? space : CODEX_DETAIL_HEIGHT;
             reply = detail->has_reply ? detail->reply : NULL;
-            notice = reply ? NULL : "No reply yet";
+            notice = NULL;
         } else if (!status) {
             notice = "Session unavailable";
         }
@@ -348,9 +354,10 @@ static void draw_codex_detail(const lab_display_state_t *state, const codex_row_
 
     const int reply_y = SESSIONS_FIRST_ROW + SESSION_REPLY_OFFSET;
     draw_codex_card(state, SESSIONS_FIRST_ROW, SESSIONS_ROWS_HEIGHT, true, session);
+    if (!notice && !reply && session) notice = codex_reply_placeholder(session);
     if (notice) {
-        int notice_y = SESSIONS_FIRST_ROW + (session ? SESSION_REPLY_OFFSET : SESSION_TITLE_OFFSET);
-        text_at(CONTENT_X, notice_y + 25, notice, UI_FONT_BODY, UI_SECONDARY);
+        int baseline = session ? reply_y + SESSION_REPLY_BASELINE : SESSIONS_FIRST_ROW + SESSION_TITLE_OFFSET + 25;
+        text_at(CONTENT_X, baseline, notice, UI_FONT_BODY, UI_SECONDARY);
     } else if (reply) codex_bitmap(CONTENT_X, reply_y, reply, height, UI_SECONDARY);
 
     char navigation[48];
@@ -378,9 +385,8 @@ static void draw_codex(const lab_display_state_t *state)
         return;
     }
     if (!count) {
-        if (!status) text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53,
-                             snapshot && snapshot->received_ms ? "No active sessions" : "Loading sessions",
-                             UI_FONT_BODY, UI_TEXT);
+        if (!status && (!snapshot || !snapshot->received_ms))
+            text_at(UI_LEFT_MARGIN, UI_CONTENT_TOP + 53, "Loading sessions", UI_FONT_BODY, UI_TEXT);
         footer(pet_hint, NULL, "Stick: left / right");
         return;
     }
@@ -393,8 +399,12 @@ static void draw_codex(const lab_display_state_t *state)
         int y = SESSIONS_FIRST_ROW + (int)(i - first) * (SESSION_ROW_HEIGHT + UI_SPACE);
         const codex_row_t *row = &snapshot->rows[i];
         draw_codex_card(state, y, SESSION_ROW_HEIGHT, focus == i, &row->session);
+        const int reply_y = y + SESSION_REPLY_OFFSET;
         if (row->has_preview)
-            codex_bitmap(CONTENT_X, y + SESSION_REPLY_OFFSET, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
+            codex_bitmap(CONTENT_X, reply_y, row->preview, CODEX_PREVIEW_HEIGHT, UI_SECONDARY);
+        else
+            text_at(CONTENT_X, reply_y + SESSION_REPLY_BASELINE, codex_reply_placeholder(&row->session),
+                    UI_FONT_BODY, UI_SECONDARY);
     }
     footer(pet_hint, "SW3: details", snapshot->count > 1 ? "Stick: move / browse" : "Stick: left / right");
 }
