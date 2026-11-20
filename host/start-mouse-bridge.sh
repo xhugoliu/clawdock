@@ -5,6 +5,8 @@ app_dir="$host_dir/ClawDock.app"
 app="$app_dir/Contents/MacOS/ClawDock"
 rebuild=false
 if [ ! -x "$app" ] || [ "$host_dir/Info.plist" -nt "$app" ]; then rebuild=true; fi
+icon="$app_dir/Contents/Resources/ClawDock.icns"
+if [ ! -f "$icon" ] || [ "$host_dir/Resources/ClawDock.icns" -nt "$icon" ]; then rebuild=true; fi
 for source in "$host_dir"/Sources/*.swift; do
     if [ "$source" -nt "$app" ]; then rebuild=true; fi
 done

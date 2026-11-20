@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
+  <title>Clawd</title>
+  <rect x="5" y="5" width="54" height="54" rx="12" fill="#EEEEEE"/>
+  <path fill="#E6774D" d="M16 20H48V28H52V36H48V48H44V40H40V48H36V40H28V48H24V40H20V48H16V36H12V28H16Z"/>
+  <path fill="#000000" d="M24 24H28V32H24Z M36 24H40V32H36Z"/>
+</svg>
