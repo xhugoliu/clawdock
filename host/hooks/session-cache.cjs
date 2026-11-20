@@ -4,7 +4,7 @@ const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 
 function cache(source) {
-    const override = process.env.JINTAI_SESSION_EVENTS_DIR;
+    const override = process.env.CLAWDOCK_SESSION_EVENTS_DIR ?? process.env.JINTAI_SESSION_EVENTS_DIR;
     const root = override && path.isAbsolute(override) ? override :
         path.join(os.homedir(), 'Library/Caches/com.jintai.host/sessions');
     const directory = path.join(root, source);

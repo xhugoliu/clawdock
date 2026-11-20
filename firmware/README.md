@@ -1,4 +1,4 @@
-# 近台 ESP32-P4 固件
+# ClawDock ESP32-P4 固件
 
 固件面向 ESP32-P4 v3，在 640×480 屏幕上提供会话监看、鼠标、输入诊断和 Clawd 桌宠。[界面预览](../README.md#应用界面)
 
@@ -89,33 +89,33 @@ python3 -m venv .venv
 
 烧录前核对板型、当前分区及恢复路径，并备份需要保留的设备数据。独立固件的默认分区布局可能与原设备不同，整套烧录或改写分区表可能覆盖设备数据。原项目固件的完整恢复待实机验证，R206 各板型的恢复包见原项目发布页。[HachimoDock v0.1.217](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217)
 
-通过 USB-UART 以 115200 baud 查看近台日志，启动信息包括芯片修订号和可用堆内存。输入数据可在 `INPUT LAB` 查看。Mac 菜单栏应用运行时会占用串口，烧录或打开串口监视器前先从菜单退出。固件运行时未初始化音频或 Wi-Fi，也未读写应用数据分区。[独立固件首次烧录](../experiments/2026-11-17-input-firmware.md)
+通过 USB-UART 以 115200 baud 查看 ClawDock 日志，启动信息包括芯片修订号和可用堆内存。输入数据可在 `INPUT LAB` 查看。Mac 菜单栏应用运行时会占用串口，烧录或打开串口监视器前先从菜单退出。固件运行时未初始化音频或 Wi-Fi，也未读写应用数据分区。[独立固件首次烧录](../experiments/2026-11-17-input-firmware.md)
 
 ## 主机测试
 
 以下命令在仓库根目录运行，覆盖应用切换、休眠、会话 Clawd、鼠标并击、触控板、摇杆与触控报告。
 
 ```sh
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/app_manager_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/jintai-app-manager-test
-/tmp/jintai-app-manager-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/app_manager_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/clawdock-app-manager-test
+/tmp/clawdock-app-manager-test
 
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/screen_idle_test.c firmware/main/screen_idle.c -o /tmp/jintai-screen-idle-test
-/tmp/jintai-screen-idle-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/screen_idle_test.c firmware/main/screen_idle.c -o /tmp/clawdock-screen-idle-test
+/tmp/clawdock-screen-idle-test
 
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/sessions_clawd_test.c firmware/main/sessions_clawd.c firmware/main/clawd.c -o /tmp/jintai-sessions-clawd-test
-/tmp/jintai-sessions-clawd-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/sessions_clawd_test.c firmware/main/sessions_clawd.c firmware/main/clawd.c -o /tmp/clawdock-sessions-clawd-test
+/tmp/clawdock-sessions-clawd-test
 
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/mouse_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/jintai-mouse-test
-/tmp/jintai-mouse-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/mouse_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/clawdock-mouse-test
+/tmp/clawdock-mouse-test
 
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touchpad_test.c firmware/main/touchpad.c -o /tmp/jintai-touchpad-test
-/tmp/jintai-touchpad-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touchpad_test.c firmware/main/touchpad.c -o /tmp/clawdock-touchpad-test
+/tmp/clawdock-touchpad-test
 
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/joystick_test.c firmware/main/joystick.c -o /tmp/jintai-joystick-test
-/tmp/jintai-joystick-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/joystick_test.c firmware/main/joystick.c -o /tmp/clawdock-joystick-test
+/tmp/clawdock-joystick-test
 
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touch_format_test.c firmware/main/touch_format.c -o /tmp/jintai-touch-format-test
-/tmp/jintai-touch-format-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/touch_format_test.c firmware/main/touch_format.c -o /tmp/clawdock-touch-format-test
+/tmp/clawdock-touch-format-test
 ```
 
 ## 设备界面与素材构建
@@ -141,4 +141,4 @@ python3 firmware/scripts/build_clawd_frames.py
 
 - **ST7701** · MIPI 驱动与面板初始化包含 HachimoDock 的 Apache-2.0 组件。[驱动来源](components/st7701/NOTICE.md) · [许可证](components/st7701/LICENSE)
 - **Noto Sans** · 固件中的预生成字形。[源字体](https://github.com/google/fonts/blob/7af0d90b4d532ffa4b041937b560c6df4e7b1e95/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf) · [SIL OFL 1.1](main/app_ui_font.OFL.txt)
-- **Clawd** · Anthropic 的 Claude Code 吉祥物。动画 SVG 主要来自 Clawd Tank，近台调整了开心跳的幅度并增加了吃饼干动画。[上游动画素材](https://github.com/marciogranzotto/clawd-tank/tree/ee5c079c45a39e06e79b7a39f3e6d9beca223021/assets/svg-animations) · [MIT 许可](assets/clawd/LICENSE)
+- **Clawd** · Anthropic 的 Claude Code 吉祥物。动画 SVG 主要来自 Clawd Tank，ClawDock 调整了开心跳的幅度并增加了吃饼干动画。[上游动画素材](https://github.com/marciogranzotto/clawd-tank/tree/ee5c079c45a39e06e79b7a39f3e6d9beca223021/assets/svg-animations) · [MIT 许可](assets/clawd/LICENSE)

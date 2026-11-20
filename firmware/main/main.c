@@ -94,7 +94,7 @@ static void display_task(void *unused)
                         warning_shown = false;
                         printf("display sleep canceled t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
                     }
-                    if (state.app.current == JINTAI_CODEX_APP && !state.app.choosing) {
+                    if (state.app.current == CLAWDOCK_CODEX_APP && !state.app.choosing) {
                         state.codex = &display_codex.list;
                         state.codex_detail = state.app.codex_detail ? &display_codex.detail : NULL;
                         state.codex_last_contact_ms = codex_uart_read(&display_codex.list,
@@ -102,7 +102,7 @@ static void display_task(void *unused)
                                                                      &state.codex_sources_unavailable);
                     }
                     state.now_ms = esp_timer_get_time() / 1000;
-                    if (state.app.current == JINTAI_CLAWD_APP && !state.app.choosing)
+                    if (state.app.current == CLAWDOCK_CLAWD_APP && !state.app.choosing)
                         state.local_minute = codex_uart_local_minute(state.now_ms);
                     status = lab_display_update(&state);
                 }
@@ -120,7 +120,7 @@ static void display_task(void *unused)
                 return;
             }
         }
-        bool show_clawd = state.app.current == JINTAI_CLAWD_APP || state.app.current == JINTAI_CODEX_APP;
+        bool show_clawd = state.app.current == CLAWDOCK_CLAWD_APP || state.app.current == CLAWDOCK_CODEX_APP;
         bool clawd_active = state.awake && !state.sleep_warning && !state.app.choosing && show_clawd;
         vTaskDelayUntil(&last, pdMS_TO_TICKS(clawd_active ? 50 : 100));
     }
@@ -153,7 +153,7 @@ void app_main(void)
 {
     esp_chip_info_t chip;
     esp_chip_info(&chip);
-    printf("\nJintai input diagnostics v0.1; chip revision=%d cores=%d\n",
+    printf("\nClawDock input diagnostics v0.1; chip revision=%d cores=%d\n",
            chip.revision, chip.cores);
     printf("Buttons are active-low; ADC values are raw and uncalibrated.\n");
     printf("Sample period %d ms; button debounce %d samples; report %d ms.\n",
@@ -212,7 +212,7 @@ void app_main(void)
     screen_idle_t screen_idle = { .last_event_us = esp_timer_get_time() };
     TickType_t last_sample = xTaskGetTickCount();
     while (true) {
-        bool diagnostics = apps.view.current == JINTAI_INPUT_APP && !apps.view.choosing;
+        bool diagnostics = apps.view.current == CLAWDOCK_INPUT_APP && !apps.view.choosing;
         bool button_changed = sample_buttons(diagnostics);
         int x, y;
         esp_err_t x_result = adc_oneshot_read(adc, ADC1_GPIO21_CHANNEL, &x);
@@ -267,7 +267,7 @@ void app_main(void)
                                                       state.normalized_x, state.normalized_y, &state.touch);
             state.awake = phase != SCREEN_ASLEEP;
             state.sleep_warning = phase == SCREEN_WARNING;
-            if (!state.awake && system_awake && apps.view.current == JINTAI_MOUSE_APP) {
+            if (!state.awake && system_awake && apps.view.current == CLAWDOCK_MOUSE_APP) {
                 mouse_release(&apps.runtime.mouse);
                 output_mouse_report(0, 0, 0, 0, 0);
                 touchpad_reset(&touchpad);
@@ -278,7 +278,7 @@ void app_main(void)
             system_awake = state.awake;
             if (state.awake) {
                 codex_summary_t codex = {0};
-                if (apps.view.current == JINTAI_CODEX_APP)
+                if (apps.view.current == CLAWDOCK_CODEX_APP)
                     codex_uart_summary(&codex, apps.view.codex_detail ? apps.view.codex_id : NULL, now / 1000);
                 app_input_t input = {
                     .joystick_ready = state.adc_ok && state.joystick_calibrated,
@@ -299,9 +299,9 @@ void app_main(void)
                            app_name(apps.view.current), apps.view.choosing ? "yes" : "no", app_name(apps.view.selected));
                 }
                 /* Preserve every button edge, including press/release within the chord window. */
-                if (previous_app.current == JINTAI_MOUSE_APP && apps.view.current != JINTAI_MOUSE_APP)
+                if (previous_app.current == CLAWDOCK_MOUSE_APP && apps.view.current != CLAWDOCK_MOUSE_APP)
                     output_mouse_report(0, 0, 0, 0, 0);
-                if (apps.view.current == JINTAI_MOUSE_APP) {
+                if (apps.view.current == CLAWDOCK_MOUSE_APP) {
                     uint8_t button_state;
                     while (mouse_peek(&apps.runtime.mouse, &button_state)) {
                         output_mouse_report(button_state, 0, 0, 0, 0);
@@ -340,7 +340,7 @@ void app_main(void)
                     previous_count = previous_valid = 255;
                 }
             }
-            bool showing_detail = apps.view.current == JINTAI_CODEX_APP && !apps.view.choosing && apps.view.codex_detail;
+            bool showing_detail = apps.view.current == CLAWDOCK_CODEX_APP && !apps.view.choosing && apps.view.codex_detail;
             codex_uart_request(showing_detail ? apps.view.codex_id : NULL, apps.view.codex_page, now / 1000);
             state.app = apps.view;
             if (display_queue) xQueueOverwrite(display_queue, &state);

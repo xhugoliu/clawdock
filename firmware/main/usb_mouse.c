@@ -33,7 +33,7 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
     (void)langid;
     static uint16_t desc[32];
     if (index == 0) { desc[0] = (TUSB_DESC_STRING << 8) | 4; desc[1] = 0x0409; return desc; }
-    const char *s = index == 1 ? "Jintai" : index == 2 ? "Jintai Mouse" : NULL;
+    const char *s = index == 1 ? "ClawDock" : index == 2 ? "ClawDock Mouse" : NULL;
     if (!s) return NULL;
     size_t n = strlen(s);
     for (size_t i = 0; i < n; ++i) desc[i + 1] = (uint8_t)s[i];

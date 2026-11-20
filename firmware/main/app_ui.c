@@ -201,9 +201,9 @@ static void draw_diagnostics(const lab_display_state_t *state)
 
 static void draw_selector(const app_view_t *app)
 {
-    enum { ROW_HEIGHT = (CONTENT_BOTTOM - UI_CONTENT_TOP - (JINTAI_APP_COUNT - 1) * UI_SPACE) / JINTAI_APP_COUNT };
+    enum { ROW_HEIGHT = (CONTENT_BOTTOM - UI_CONTENT_TOP - (CLAWDOCK_APP_COUNT - 1) * UI_SPACE) / CLAWDOCK_APP_COUNT };
     page_title("Apps");
-    for (unsigned i = 0; i < JINTAI_APP_COUNT; ++i) {
+    for (unsigned i = 0; i < CLAWDOCK_APP_COUNT; ++i) {
         int y = UI_CONTENT_TOP + (int)i * (ROW_HEIGHT + UI_SPACE);
         int baseline = y + ROW_HEIGHT / 2 + 9;
         list_row(y, ROW_HEIGHT, y + ROW_HEIGHT / 2, i == app->selected);
@@ -373,7 +373,7 @@ static void draw_codex(const lab_display_state_t *state)
     while (focus < count && memcmp(state->app.codex_id, snapshot->rows[focus].id, CODEX_ID_BYTES) != 0)
         ++focus;
 
-    const char *title = app_title(JINTAI_CODEX_APP);
+    const char *title = app_title(CLAWDOCK_CODEX_APP);
     const char *status = codex_link_status(state);
     page_title(title);
     if (status) text_at(UI_LEFT_MARGIN + text_width(title, UI_FONT_TITLE) + UI_INSET,
@@ -547,7 +547,7 @@ static void draw_clawd(const lab_display_state_t *state, uint16_t body_color)
         clock[3] = '0' + minute / 10;
         clock[4] = '0' + minute % 10;
     }
-    page_title(app_title(JINTAI_CLAWD_APP));
+    page_title(app_title(CLAWDOCK_CLAWD_APP));
     text_end(WIDTH - UI_INSET, UI_TITLE_BASELINE, clock, UI_FONT_TITLE, UI_TEXT);
     draw_clawd_sprite(pet, pet->x, pet->y, 1, state->now_ms, &stage, body_color);
     text_at(UI_LEFT_MARGIN, FOOTER_BASELINE - 32, "Stick: move", UI_FONT_HINT, UI_SECONDARY);
@@ -574,12 +574,12 @@ static void render(uint16_t *buffer, const lab_display_state_t *state, uint16_t 
         return;
     }
     switch (state->app.current) {
-        case JINTAI_INPUT_APP: draw_diagnostics(state); break;
-        case JINTAI_MOUSE_APP: draw_mouse(&state->app); break;
-        case JINTAI_CODEX_APP: draw_codex(state); break;
-        case JINTAI_CLAWD_APP: draw_clawd(state, clawd_body_color); break;
+        case CLAWDOCK_INPUT_APP: draw_diagnostics(state); break;
+        case CLAWDOCK_MOUSE_APP: draw_mouse(&state->app); break;
+        case CLAWDOCK_CODEX_APP: draw_codex(state); break;
+        case CLAWDOCK_CLAWD_APP: draw_clawd(state, clawd_body_color); break;
     }
-    if (state->app.current == JINTAI_CODEX_APP) {
+    if (state->app.current == CLAWDOCK_CODEX_APP) {
         enum { CAMEO_PIXEL_STEP = 2 };
         const sprite_area_t stage = {UI_LEFT_MARGIN, UI_CONTENT_TOP, WIDTH, CONTENT_BOTTOM};
         sessions_clawd_update(&sessions_clawd, state->codex, pet_requested, state->app.sessions_clawd_stick_x, state->now_ms);

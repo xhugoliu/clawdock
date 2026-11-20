@@ -26,7 +26,8 @@ final class HookSessions {
     private let fractionalTime = ISO8601DateFormatter()
 
     init() {
-        let override = ProcessInfo.processInfo.environment["JINTAI_SESSION_EVENTS_DIR"]
+        let environment = ProcessInfo.processInfo.environment
+        let override = environment["CLAWDOCK_SESSION_EVENTS_DIR"] ?? environment["JINTAI_SESSION_EVENTS_DIR"]
         directory = override.flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0, isDirectory: true) : nil }
             ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/com.jintai.host/sessions", isDirectory: true)
         decoder.dateDecodingStrategy = .millisecondsSince1970

@@ -1,6 +1,6 @@
-# 近台 · Jintai
+# ClawDock
 
-近台是基于 HachimoDock 和 ESP32-P4 的桌面交互终端。设备屏幕可以显示 Codex、OpenCode、Claude Code 和 Pi 的本地会话，也可以用作鼠标、输入诊断台和 Clawd 桌宠。
+ClawDock 是基于 HachimoDock 和 ESP32-P4 的实体桌宠。Clawd 会随编程会话状态改变动作，也能用摇杆、按键和触屏互动。设备可以查看 Codex、OpenCode、Claude Code 和 Pi 的本地会话，并提供鼠标和输入诊断功能。
 
 ## 应用界面
 
@@ -36,7 +36,7 @@
 
 ## 快速开始
 
-已运行近台固件的设备开机进入 `SESSIONS`。同时按住 SW1、SW2、SW3 打开应用选择器，用摇杆上下选择，松开三个键后切换应用。
+运行 ClawDock 固件的设备开机进入 `SESSIONS`。同时按住 SW1、SW2、SW3 打开应用选择器，用摇杆上下选择，松开三个键后切换应用。
 
 通过 CH343 USB-UART 将设备连接到 Mac，在仓库根目录运行以下命令。菜单栏应用负责会话同步、鼠标桥接和 Clawd 校时。
 
@@ -62,4 +62,4 @@ host/start-mouse-bridge.sh
 
 ## 参考项目
 
-近台以 HachimoDock 为硬件起点，独立开发设备端应用和 Mac 桥接程序。屏幕驱动及面板初始化代码包含原项目的 Apache-2.0 组件。[HachimoDock](https://github.com/ai-maker-lab/HachimoDock) · [第三方代码与素材](firmware/README.md#第三方代码与素材)
+ClawDock 以 HachimoDock 为硬件起点，独立开发设备端应用和 Mac 桥接程序。屏幕驱动及面板初始化代码包含原项目的 Apache-2.0 组件。[HachimoDock](https://github.com/ai-maker-lab/HachimoDock) · [第三方代码与素材](firmware/README.md#第三方代码与素材)

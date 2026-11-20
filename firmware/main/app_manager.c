@@ -38,7 +38,7 @@ static void block_input(app_manager_t *m)
 
 void app_manager_wake(app_manager_t *manager)
 {
-    if (manager->view.current == JINTAI_MOUSE_APP) mouse_release(&manager->runtime.mouse);
+    if (manager->view.current == CLAWDOCK_MOUSE_APP) mouse_release(&manager->runtime.mouse);
     manager->view.choosing = false;
     manager->view.selected = manager->view.current;
     manager->mouse_chord = 0;
@@ -47,7 +47,7 @@ void app_manager_wake(app_manager_t *manager)
 
 static void deliver_button(app_manager_t *m, unsigned button, bool pressed, int64_t now_ms)
 {
-    if (m->view.current == JINTAI_CODEX_APP && pressed) {
+    if (m->view.current == CLAWDOCK_CODEX_APP && pressed) {
         if (button < 2) {
             ++m->view.sessions_clawd_requests;
         } else if (button == 2 && (m->view.codex_detail || m->view.codex_has_selection)) {
@@ -55,14 +55,14 @@ static void deliver_button(app_manager_t *m, unsigned button, bool pressed, int6
             if (m->view.codex_detail) m->view.codex_page = 0;
         }
     }
-    if (m->view.current == JINTAI_CLAWD_APP && pressed) clawd_button(&m->clawd, button, now_ms);
+    if (m->view.current == CLAWDOCK_CLAWD_APP && pressed) clawd_button(&m->clawd, button, now_ms);
     app_button(&m->runtime, m->view.current, button, pressed);
     m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
 }
 
 static void flush_pending(app_manager_t *m, int64_t now_ms)
 {
-    if (m->view.current == JINTAI_MOUSE_APP) {
+    if (m->view.current == CLAWDOCK_MOUSE_APP) {
         unsigned seen = 0, held = 0;
         for (unsigned i = 0; i < m->pending_count; ++i) {
             unsigned bit = 1U << m->pending[i].button;
@@ -91,7 +91,7 @@ static void select_current(app_manager_t *m)
         app_stop(&m->runtime, m->view.current);
         m->view.current = m->view.selected;
         app_start(&m->runtime, m->view.current);
-        if (m->view.current == JINTAI_CLAWD_APP) m->clawd.next_auto_ms = 0;
+        if (m->view.current == CLAWDOCK_CLAWD_APP) m->clawd.next_auto_ms = 0;
         m->view.mouse_scroll = m->runtime.mouse.scroll_mode;
         m->view.codex_row = 0;
         memset(m->view.codex_id, 0, sizeof(m->view.codex_id));
@@ -116,7 +116,7 @@ static int navigation_step(app_manager_t *m, const app_input_t *in)
 static void navigate(app_manager_t *m, const app_input_t *in)
 {
     int step = navigation_step(m, in);
-    m->view.selected = (m->view.selected + JINTAI_APP_COUNT + step) % JINTAI_APP_COUNT;
+    m->view.selected = (m->view.selected + CLAWDOCK_APP_COUNT + step) % CLAWDOCK_APP_COUNT;
 }
 
 static void navigate_codex(app_manager_t *m, const app_input_t *in)
@@ -218,7 +218,7 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
     if (m->chord_pending && switches_pressed(in)) {
         m->chord_pending = false;
         m->pending_count = 0;
-        if (m->view.current == JINTAI_MOUSE_APP) mouse_release(&m->runtime.mouse);
+        if (m->view.current == CLAWDOCK_MOUSE_APP) mouse_release(&m->runtime.mouse);
         m->view.choosing = true;
         m->view.selected = m->view.current;
         m->navigation_armed = true;
@@ -227,11 +227,11 @@ void app_manager_update(app_manager_t *m, const app_input_t *in, int64_t now_ms)
     }
     if (m->chord_pending && switches_released(in)) flush_pending(m, now_ms);
     if (m->chord_locked && switches_released(in)) m->chord_locked = false;
-    if (m->view.current == JINTAI_CODEX_APP) {
+    if (m->view.current == CLAWDOCK_CODEX_APP) {
         if (!m->chord_pending) navigate_codex(m, in);
         if (in->joystick_ready) m->view.sessions_clawd_stick_x = in->joystick_x;
     }
-    if (m->view.current == JINTAI_CLAWD_APP) {
+    if (m->view.current == CLAWDOCK_CLAWD_APP) {
         bool active = !m->chord_pending;
         if (active && in->buttons[3] && !old[3]) clawd_button(&m->clawd, 3, now_ms);
         clawd_update(&m->clawd, active && in->joystick_ready ? in->joystick_x : 0,

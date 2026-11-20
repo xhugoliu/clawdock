@@ -172,5 +172,5 @@ int codex_uart_local_minute(int64_t now_ms)
     xSemaphoreGive(lock);
     if (!synced_at) return -1;
     int64_t elapsed = now_ms > synced_at ? now_ms - synced_at : 0;
-    return (day_ms + elapsed) % JINTAI_DAY_MS / 60000;
+    return (day_ms + elapsed) % CLAWDOCK_DAY_MS / 60000;
 }

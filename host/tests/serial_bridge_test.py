@@ -5,11 +5,10 @@ import subprocess
 import time
 from pathlib import Path
 
-app = Path(__file__).resolve().parents[1] / 'Jintai.app/Contents/MacOS/Jintai'
+app = Path(__file__).resolve().parents[1] / 'ClawDock.app/Contents/MacOS/ClawDock'
 master, slave = pty.openpty()
-env = dict(os.environ, JINTAI_MOUSE_DEBUG='1', JINTAI_MOUSE_TEST_NO_POST='1')
 proc = subprocess.Popen([str(app), '--test-serial', os.ttyname(slave)], stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, env=env)
+                        stderr=subprocess.STDOUT)
 try:
     time.sleep(0.5)
     os.write(master, b'JT_MOUSE 0 0')

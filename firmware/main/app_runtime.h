@@ -3,11 +3,11 @@
 #include "mouse.h"
 
 enum {
-    JINTAI_CODEX_APP,
-    JINTAI_MOUSE_APP,
-    JINTAI_INPUT_APP,
-    JINTAI_CLAWD_APP,
-    JINTAI_APP_COUNT,
+    CLAWDOCK_CODEX_APP,
+    CLAWDOCK_MOUSE_APP,
+    CLAWDOCK_INPUT_APP,
+    CLAWDOCK_CLAWD_APP,
+    CLAWDOCK_APP_COUNT,
 };
 
 typedef struct {

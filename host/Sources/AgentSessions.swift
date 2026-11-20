@@ -27,6 +27,7 @@ struct AgentSession {
     }
 
     static func id(for source: AgentSource, nativeID: String) -> UUID {
+        // Keep the namespace stable so sessions retain their IDs across app updates.
         let key = Data("com.jintai.session:\(source.rawValue):\(nativeID)".utf8)
         var bytes = Array(SHA256.hash(data: key).prefix(16))
         bytes[6] = (bytes[6] & 0x0f) | 0x80

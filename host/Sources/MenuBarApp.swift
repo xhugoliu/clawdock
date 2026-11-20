@@ -56,7 +56,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return true
         }
         icon.isTemplate = true
-        icon.accessibilityDescription = "近台"
+        icon.accessibilityDescription = "ClawDock"
         return icon
     }
     func applicationWillTerminate(_ notification: Notification) {
@@ -102,11 +102,11 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return "等待设备连接"
     }
     private func updateIcon() {
-        statusItem.button?.toolTip = "近台 — \(status)"
+        statusItem.button?.toolTip = "ClawDock — \(status)"
     }
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let heading = NSMenuItem(title: "近台", action: nil, keyEquivalent: "")
+        let heading = NSMenuItem(title: "ClawDock", action: nil, keyEquivalent: "")
         heading.isEnabled = false
         menu.addItem(heading)
         let statusLine = NSMenuItem(title: status, action: nil, keyEquivalent: "")
@@ -144,7 +144,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         reconnect.target = self
         menu.addItem(reconnect)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "退出近台", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "退出 ClawDock", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }

@@ -59,31 +59,31 @@ static bool action_pose(clawd_pose_t pose)
 int main(void)
 {
     reset();
-    assert(manager.view.current == JINTAI_CODEX_APP && manager.view.current == 0);
+    assert(manager.view.current == CLAWDOCK_CODEX_APP && manager.view.current == 0);
     open_selector();
-    release_chord(); assert(!manager.view.choosing && manager.view.current == JINTAI_CODEX_APP);
+    release_chord(); assert(!manager.view.choosing && manager.view.current == CLAWDOCK_CODEX_APP);
     update(20);
     open_selector();
-    assert(manager.view.current == JINTAI_CODEX_APP && manager.view.selected == JINTAI_CODEX_APP);
+    assert(manager.view.current == CLAWDOCK_CODEX_APP && manager.view.selected == CLAWDOCK_CODEX_APP);
     update(1000); assert(manager.view.choosing); /* Long hold never toggles. */
-    move(800); assert(manager.view.selected == JINTAI_CLAWD_APP); /* Wrap up. */
-    move(-800); assert(manager.view.selected == JINTAI_CODEX_APP); /* Wrap down. */
-    move(-800); assert(manager.view.selected == JINTAI_MOUSE_APP);
+    move(800); assert(manager.view.selected == CLAWDOCK_CLAWD_APP); /* Wrap up. */
+    move(-800); assert(manager.view.selected == CLAWDOCK_CODEX_APP); /* Wrap down. */
+    move(-800); assert(manager.view.selected == CLAWDOCK_MOUSE_APP);
     input.joystick_y = -800; update(20);
-    assert(manager.view.selected == JINTAI_INPUT_APP);
-    update(500); assert(manager.view.selected == JINTAI_INPUT_APP); /* One step until centered. */
+    assert(manager.view.selected == CLAWDOCK_INPUT_APP);
+    update(500); assert(manager.view.selected == CLAWDOCK_INPUT_APP); /* One step until centered. */
     input.joystick_y = 0; update(20);
-    assert(manager.view.current == JINTAI_CODEX_APP); /* No switch while held. */
+    assert(manager.view.current == CLAWDOCK_CODEX_APP); /* No switch while held. */
     input.buttons[0] = false; update(20);
     input.buttons[1] = false; update(20);
-    assert(manager.view.choosing && manager.view.current == JINTAI_CODEX_APP); /* Wait for all up. */
+    assert(manager.view.choosing && manager.view.current == CLAWDOCK_CODEX_APP); /* Wait for all up. */
     input.buttons[2] = false; update(20);
-    assert(!manager.view.choosing && manager.view.current == JINTAI_INPUT_APP);
+    assert(!manager.view.choosing && manager.view.current == CLAWDOCK_INPUT_APP);
     codex_summary_t sessions = { .count = 3, .ids = {{1}, {2}, {3}} };
     input.codex = &sessions;
     update(20);
     open_selector(); move(800); move(800); release_chord();
-    assert(!manager.view.choosing && manager.view.current == JINTAI_CODEX_APP);
+    assert(!manager.view.choosing && manager.view.current == CLAWDOCK_CODEX_APP);
     update(20); /* Guard releases only after inputs return to neutral. */
     update(20); assert(manager.view.codex_row == 0);
     input.joystick_y = -800; update(20);
@@ -130,13 +130,13 @@ int main(void)
     tap_sw(2);
 
     open_selector();
-    assert(manager.view.codex_row == 1 && manager.view.selected == JINTAI_CODEX_APP);
+    assert(manager.view.codex_row == 1 && manager.view.selected == CLAWDOCK_CODEX_APP);
     release_chord(); /* Selecting the original app resumes its state. */
-    assert(manager.view.current == JINTAI_CODEX_APP && manager.view.codex_row == 1);
+    assert(manager.view.current == CLAWDOCK_CODEX_APP && manager.view.codex_row == 1);
     update(20);
     open_selector(); move(800);
     release_chord();
-    assert(manager.view.current == JINTAI_CLAWD_APP && manager.view.clawd.pose == CLAWD_IDLE);
+    assert(manager.view.current == CLAWDOCK_CLAWD_APP && manager.view.clawd.pose == CLAWD_IDLE);
     update(20); tap_sw(0);
     clawd_pose_t initial_reaction = manager.view.clawd.pose;
     assert(action_pose(initial_reaction));
@@ -149,13 +149,13 @@ int main(void)
     open_selector();
     input.joystick_y = 800; update(20); /* Keep stick deflected after release. */
     release_chord();
-    assert(manager.view.current == JINTAI_INPUT_APP && manager.input_blocked);
+    assert(manager.view.current == CLAWDOCK_INPUT_APP && manager.input_blocked);
     input.buttons[0] = true; update(20);
     assert(manager.view.clawd.pose == initial_reaction);
     input.buttons[0] = false; input.joystick_y = 0; update(20);
     assert(!manager.input_blocked);
     open_selector(); move(-800); release_chord(); update(20);
-    assert(manager.view.current == JINTAI_CLAWD_APP && manager.view.clawd.pose == initial_reaction);
+    assert(manager.view.current == CLAWDOCK_CLAWD_APP && manager.view.clawd.pose == initial_reaction);
 
     /* A late third key cannot turn already delivered events into a chord. */
     input.buttons[0] = true; update(20); update(181);
@@ -223,7 +223,7 @@ int main(void)
     assert(action_pose(manager.view.clawd.pose) && manager.view.clawd.pose != last && manager.view.clawd.pose != previous);
 
     open_selector(); move(-800); release_chord(); update(20); update(20);
-    assert(manager.view.current == JINTAI_CODEX_APP && manager.view.codex_id[0] == 2);
+    assert(manager.view.current == CLAWDOCK_CODEX_APP && manager.view.codex_id[0] == 2);
     sessions.count = 1;
     move(-800);
     move(800);
@@ -243,6 +243,6 @@ int main(void)
     app_manager_wake(&manager);
     assert(!manager.view.choosing && manager.view.selected == manager.view.current);
     release_chord();
-    assert(manager.view.current == JINTAI_CODEX_APP);
+    assert(manager.view.current == CLAWDOCK_CODEX_APP);
     puts("app manager tests passed");
 }

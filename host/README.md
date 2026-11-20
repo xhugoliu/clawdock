@@ -1,6 +1,6 @@
-# 近台 macOS 菜单栏应用
+# ClawDock macOS 菜单栏应用
 
-近台通过 CH343 USB-UART 与设备通信，提供鼠标桥接、会话同步和 Clawd 校时。应用的入口在 macOS 菜单栏，默认手动启动。[设备界面预览](../README.md#应用界面)
+ClawDock 通过 CH343 USB-UART 与设备通信，提供鼠标桥接、会话同步和 Clawd 校时。应用的入口在 macOS 菜单栏，默认手动启动。[设备界面预览](../README.md#应用界面)
 
 ## 启动
 
@@ -10,19 +10,19 @@
 host/start-mouse-bridge.sh
 ```
 
-脚本首次运行或源码更新后会构建 `host/Jintai.app`，然后启动应用。以后也可以在 Finder 中双击该应用。点击右上角的近台图标，可查看连接状态、启停鼠标桥接和会话监看、选择串口、重新连接或退出。
+脚本首次运行或源码更新后会构建 `host/ClawDock.app`，然后启动应用。以后也可以在 Finder 中双击该应用。点击右上角的 ClawDock 图标，可查看连接状态、启停鼠标桥接和会话监看、选择串口、重新连接或退出。
 
 ## 串口连接
 
-应用按 CH343 的 VID `1A86` 和 PID `55D3` 查找串口。首次只有一个候选串口时会自动连接，多个候选串口时请在“设备串口”中选择近台。应用会保留所选串口，串口重新出现时自动连接。更换设备导致串口名称变化时请重新选择。烧录或打开串口监视器前，先从菜单退出应用以释放串口。
+应用按 CH343 的 VID `1A86` 和 PID `55D3` 查找串口。首次只有一个候选串口时会自动连接，多个候选串口时请在“设备串口”中选择 ClawDock。应用会保留所选串口，串口重新出现时自动连接。更换设备导致串口名称变化时请重新选择。烧录或打开串口监视器前，先从菜单退出应用以释放串口。
 
 ## 鼠标桥接权限
 
-首次使用鼠标桥接需要在“系统设置 → 隐私与安全性 → 辅助功能”中允许“近台”。菜单会显示授权状态。系统未列出近台时，可手动添加本目录的 `Jintai.app`。应用使用临时签名，重新构建或更换路径后如果权限失效，需要重新授权。
+首次使用鼠标桥接需要在“系统设置 → 隐私与安全性 → 辅助功能”中允许“ClawDock”。菜单会显示授权状态。系统未列出 ClawDock 时，可手动添加本目录的 `ClawDock.app`。应用使用临时签名，重新构建或更换路径后如果权限失效，需要重新授权。
 
 ## 会话监看
 
-在近台菜单中勾选“启用会话监看”，设备端进入 `SESSIONS`。近台合并 Codex、OpenCode、Claude Code 和 Pi 的本机会话，使用会话原有标题。运行中的会话优先，近台观察到的已结束轮次保留 60 秒。Mac 将标题和最近一条可见回复渲染为位图，回复保留约 2400 个字符。预览和详情正文统一使用 27 px，详情最多 24 页，每页最多 8 行。会话监看无需辅助功能授权。[设备端操作](../firmware/README.md#会话监看)
+在 ClawDock 菜单中勾选“启用会话监看”，设备端进入 `SESSIONS`。ClawDock 合并 Codex、OpenCode、Claude Code 和 Pi 的本机会话，使用会话原有标题。运行中的会话优先，ClawDock 观察到的已结束轮次保留 60 秒。Mac 将标题和最近一条可见回复渲染为位图，回复保留约 2400 个字符。预览和详情正文统一使用 27 px，详情最多 24 页，每页最多 8 行。会话监看无需辅助功能授权。[设备端操作](../firmware/README.md#会话监看)
 
 - **Codex** 自动读取 `~/.codex/sessions` 和 `session_index.jsonl`，也支持启动环境中的 `CODEX_HOME`。标题索引缺失时显示项目目录名。运行记录超过 10 分钟没有新状态信号会退出列表。
 - **OpenCode 2.x** 自动发现 `~/.local/state/opencode/service.json` 注册的本机服务，也支持启动环境中的 `XDG_STATE_HOME`。通过服务的只读会话 API 获取状态和回复。默认共享服务内的会话可以显示。以 `--standalone` 启动的独立服务超出这一发现范围。 [OpenCode API](https://opencode.ai/docs/api)
@@ -36,7 +36,7 @@ host/start-mouse-bridge.sh
 
 - **Pi 1.5** 由扩展上报轮次和最近可见回复，等 Pi 结束重试和排队任务后记录结果。可先从仓库根目录运行 `pi -e "$PWD/host/hooks/pi.ts"`。日常使用可把该扩展的绝对路径加入 `~/.pi/agent/settings.json` 的 `extensions` 数组。 [Pi 扩展文档](https://github.com/earendil-works/pi/blob/v1.5.0/packages/coding-agent/docs/extensions.md)
 
-Claude Code 和 Pi 的 hooks 在 `~/Library/Caches/com.jintai.host/sessions` 下写入同用户可读的状态和有限回复摘要，启动新会话时清理超过一天的缓存。Claude Code 和 Pi 运行记录超过 10 分钟没有新信号也会退出列表。会话只在远端执行时，需要有相应的本地状态来源才能显示。
+Claude Code 和 Pi 的 hooks 沿用原有缓存目录，在 `~/Library/Caches/com.jintai.host/sessions` 下写入同用户可读的状态和有限回复摘要，启动新会话时清理超过一天的缓存。Claude Code 和 Pi 运行记录超过 10 分钟没有新信号也会退出列表。会话只在远端执行时，需要有相应的本地状态来源才能显示。
 
 ## 开发与测试
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-app = Path(__file__).resolve().parents[1] / 'Jintai.app/Contents/MacOS/Jintai'
+app = Path(__file__).resolve().parents[1] / 'ClawDock.app/Contents/MacOS/ClawDock'
 now = dt.datetime.now(dt.timezone.utc)
 width_bytes = 544 // 8
 
@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory() as temp:
     old.mkdir(parents=True)
     today.mkdir(parents=True, exist_ok=True)
     running, other, historical, child, long_running, long_completed, stale = [uuid.uuid4() for _ in range(7)]
-    reply = '\n'.join(f'第 {number} 行近台测试。' for number in range(1, 29))
+    reply = '\n'.join(f'第 {number} 行中文测试。' for number in range(1, 29))
     visible = record('response_item', {'type': 'message', 'role': 'assistant', 'phase': 'commentary',
                                        'content': [{'type': 'output_text', 'text': reply}]}, 11)
     secret = record('response_item', {'type': 'message', 'role': 'developer',
@@ -130,7 +130,7 @@ with tempfile.TemporaryDirectory() as temp:
     fixture(old, long_completed, event('task_started', 'complete', 3600) +
             event('task_complete', 'complete', 20) + large_result + event('token_count', 'complete', 4), ago=3601)
     fixture(old, stale, event('task_started', 'stale', 3600) + large_result + event('token_count', 'stale', 601), ago=3601)
-    title = '近台会话状态和标题栏的长标题截断验证'
+    title = '桌宠会话状态和标题栏的长标题截断验证'
     (home / 'session_index.jsonl').write_text(json.dumps({'id': str(running), 'thread_name': title}) + '\n')
 
     master, slave = pty.openpty()
@@ -272,7 +272,7 @@ def mixed_sessions():
         master, slave = pty.openpty()
         proc = subprocess.Popen([str(app), '--test-session-serial', os.ttyname(slave)], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, env=dict(os.environ, CODEX_HOME=temp, XDG_STATE_HOME=temp,
-                                                                  JINTAI_SESSION_EVENTS_DIR=str(events_dir)))
+                                                                  CLAWDOCK_SESSION_EVENTS_DIR=str(events_dir)))
         try:
             assert '测试串口已连接' in proc.stdout.readline().decode()
             open_code, claude, pi = (session_id('OpenCode', main_id), session_id('Claude Code', native),

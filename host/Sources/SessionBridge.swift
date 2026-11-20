@@ -16,7 +16,7 @@ final class SessionBridge: BridgeModule {
         }
     }
 
-    private let queue = DispatchQueue(label: "com.jintai.session-monitor", qos: .utility)
+    private let queue = DispatchQueue(label: "com.clawdock.session-monitor", qos: .utility)
     private let sessions: AgentSessions
     private let encoder = SessionFrameEncoder()
     private var generation = 0

@@ -122,7 +122,7 @@ codex_frame_t codex_decoder_byte(codex_decoder_t *decoder, uint8_t byte,
     if (crc32(body, checksum - body) != expected) return CODEX_FRAME_NONE;
     if (body[0] == CODEX_FRAME_CLOCK) {
         uint32_t value = little_endian_32(body + 3);
-        if (value >= JINTAI_DAY_MS) return CODEX_FRAME_NONE;
+        if (value >= CLAWDOCK_DAY_MS) return CODEX_FRAME_NONE;
         *clock_ms = value;
         return CODEX_FRAME_CLOCK;
     }
