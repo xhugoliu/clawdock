@@ -2,10 +2,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "display.h"
+#include "agents_screen.h"
 #include "codex_uart.h"
+#include "display.h"
 #include "joystick.h"
-#include "screen_idle.h"
+#include "sessions_clawd.h"
 #include "touch.h"
 #include "touchpad.h"
 #include "usb_mouse.h"
@@ -68,7 +69,6 @@ static void display_task(void *unused)
     }
     lab_display_state_t state = {0};
     bool awake = true;
-    bool warning_shown = false;
     TickType_t last = xTaskGetTickCount();
     while (true) {
         if (xQueuePeek(display_queue, &state, 0) == pdTRUE) {
@@ -77,35 +77,20 @@ static void display_task(void *unused)
                 status = lab_display_set_awake(false);
                 if (status == ESP_OK) {
                     awake = false;
-                    warning_shown = false;
                     printf("display sleep t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
                 }
             } else if (state.awake) {
-                if (state.sleep_warning) {
-                    if (!warning_shown) {
-                        status = lab_display_sleep_warning();
-                        if (status == ESP_OK) {
-                            warning_shown = true;
-                            printf("display sleep warning t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
-                        }
-                    }
-                } else {
-                    if (warning_shown) {
-                        warning_shown = false;
-                        printf("display sleep canceled t_ms=%lld\n", (long long)(esp_timer_get_time() / 1000));
-                    }
-                    if (state.app.current == CLAWDOCK_CODEX_APP && !state.app.choosing) {
-                        state.codex = &display_codex.list;
-                        state.codex_detail = state.app.codex_detail ? &display_codex.detail : NULL;
-                        state.codex_last_contact_ms = codex_uart_read(&display_codex.list,
-                                                                     state.app.codex_detail ? &display_codex.detail : NULL,
-                                                                     &state.codex_sources_unavailable);
-                    }
-                    state.now_ms = esp_timer_get_time() / 1000;
-                    if (state.app.current == CLAWDOCK_CLAWD_APP && !state.app.choosing)
-                        state.local_minute = codex_uart_local_minute(state.now_ms);
-                    status = lab_display_update(&state);
+                if (state.app.current == CLAWDOCK_CODEX_APP && !state.app.choosing) {
+                    state.codex = &display_codex.list;
+                    state.codex_detail = state.app.codex_detail ? &display_codex.detail : NULL;
+                    state.codex_last_contact_ms = codex_uart_read(&display_codex.list,
+                                                                 state.app.codex_detail ? &display_codex.detail : NULL,
+                                                                 &state.codex_sources_unavailable);
                 }
+                state.now_ms = esp_timer_get_time() / 1000;
+                if (state.app.current == CLAWDOCK_CLAWD_APP && !state.app.choosing)
+                    state.local_minute = codex_uart_local_minute(state.now_ms);
+                status = lab_display_update(&state);
                 if (status == ESP_OK && !awake) {
                     status = lab_display_set_awake(true);
                     if (status == ESP_OK) {
@@ -121,7 +106,7 @@ static void display_task(void *unused)
             }
         }
         bool show_clawd = state.app.current == CLAWDOCK_CLAWD_APP || state.app.current == CLAWDOCK_CODEX_APP;
-        bool clawd_active = state.awake && !state.sleep_warning && !state.app.choosing && show_clawd;
+        bool clawd_active = state.awake && !state.app.choosing && show_clawd;
         vTaskDelayUntil(&last, pdMS_TO_TICKS(clawd_active ? 50 : 100));
     }
 }
@@ -201,7 +186,9 @@ void app_main(void)
     app_manager_t apps;
     app_manager_init(&apps);
     printf("app startup current=%s\n", app_name(apps.view.current));
-    bool system_awake = true;
+    agents_screen_t agents_screen = {0};
+    sessions_clawd_t agents_clawd = {0};
+    unsigned pet_requests = 0;
     lab_joystick_cal_t joystick = {0};
     touchpad_t touchpad = {0};
     bool scroll_active = false;
@@ -209,7 +196,6 @@ void app_main(void)
     int min_y = INT32_MAX, max_y = INT32_MIN;
     unsigned int errors = 0;
     int64_t report_at = esp_timer_get_time() + REPORT_MS * 1000LL;
-    screen_idle_t screen_idle = { .last_event_us = esp_timer_get_time() };
     TickType_t last_sample = xTaskGetTickCount();
     while (true) {
         bool diagnostics = apps.view.current == CLAWDOCK_INPUT_APP && !apps.view.choosing;
@@ -262,24 +248,21 @@ void app_main(void)
                     state.normalized_y = lab_joystick_normalize(y, joystick.center_y, joystick.min_y, joystick.max_y);
                 }
             }
-            int64_t now = esp_timer_get_time();
-            screen_phase_t phase = screen_idle_update(&screen_idle, now, button_changed, state.joystick_calibrated,
-                                                      state.normalized_x, state.normalized_y, &state.touch);
-            state.awake = phase != SCREEN_ASLEEP;
-            state.sleep_warning = phase == SCREEN_WARNING;
-            if (!state.awake && system_awake && apps.view.current == CLAWDOCK_MOUSE_APP) {
-                mouse_release(&apps.runtime.mouse);
-                output_mouse_report(0, 0, 0, 0, 0);
-                touchpad_reset(&touchpad);
-                if (scroll_active) printf("JT_SCROLL 0 0\n");
-                scroll_active = false;
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            bool was_in_agents = apps.view.current == CLAWDOCK_CODEX_APP;
+            codex_summary_t codex = {0};
+            agents_screen_mode_t screen_mode = AGENTS_SCREEN_KEEP_AWAKE;
+            if (was_in_agents) {
+                codex_uart_summary(&codex, apps.view.codex_detail ? apps.view.codex_id : NULL, now_ms);
+                if (!apps.view.choosing)
+                    screen_mode = agents_screen_mode(&codex, agents_clawd.view.pose == CLAWD_SLEEPING, now_ms);
             }
-            if (state.awake && !system_awake) app_manager_wake(&apps);
-            system_awake = state.awake;
+            bool was_asleep = agents_screen.asleep;
+            state.awake = agents_screen_update(&agents_screen, screen_mode, now_ms, button_changed,
+                                              state.joystick_calibrated, state.normalized_x, state.normalized_y,
+                                              &state.touch);
+            if (state.awake && was_asleep) app_manager_wake(&apps);
             if (state.awake) {
-                codex_summary_t codex = {0};
-                if (apps.view.current == CLAWDOCK_CODEX_APP)
-                    codex_uart_summary(&codex, apps.view.codex_detail ? apps.view.codex_id : NULL, now / 1000);
                 app_input_t input = {
                     .joystick_ready = state.adc_ok && state.joystick_calibrated,
                     .joystick_x = state.normalized_x,
@@ -292,10 +275,10 @@ void app_main(void)
                 };
                 for (unsigned i = 0; i < 4; ++i) input.buttons[i] = state.buttons[i];
                 app_view_t previous_app = apps.view;
-                app_manager_update(&apps, &input, now / 1000);
+                app_manager_update(&apps, &input, now_ms);
                 if (previous_app.choosing != apps.view.choosing || previous_app.current != apps.view.current ||
                     previous_app.selected != apps.view.selected) {
-                    printf("app t_ms=%lld current=%s selecting=%s selected=%s\n", (long long)(now / 1000),
+                    printf("app t_ms=%lld current=%s selecting=%s selected=%s\n", (long long)now_ms,
                            app_name(apps.view.current), apps.view.choosing ? "yes" : "no", app_name(apps.view.selected));
                 }
                 /* Preserve every button edge, including press/release within the chord window. */
@@ -310,13 +293,13 @@ void app_main(void)
                     int8_t dx = 0, dy = 0, wheel = 0, pan = 0;
                     bool motion_active = !apps.view.choosing && !apps.input_blocked && input.joystick_ready;
                     mouse_motion(&apps.runtime.mouse, motion_active ? input.joystick_x : 0,
-                                 motion_active ? input.joystick_y : 0, now / 1000,
+                                 motion_active ? input.joystick_y : 0, now_ms,
                                  &dx, &dy, &wheel, &pan);
                     output_mouse_report(apps.runtime.mouse.buttons, dx, dy, wheel, pan);
                     bool touch_active = !apps.view.choosing && !apps.input_blocked;
                     if (touch_active) {
                         touchpad_output_t gesture;
-                        touchpad_update(&touchpad, &touch, now / 1000, &gesture);
+                        touchpad_update(&touchpad, &touch, now_ms, &gesture);
                         if (gesture.dx || gesture.dy || gesture.wheel || gesture.pan)
                             output_mouse_report(apps.runtime.mouse.buttons, gesture.dx, gesture.dy, gesture.wheel, gesture.pan);
                         if (gesture.scroll_x || gesture.scroll_y)
@@ -340,8 +323,19 @@ void app_main(void)
                     previous_count = previous_valid = 255;
                 }
             }
-            bool showing_detail = apps.view.current == CLAWDOCK_CODEX_APP && !apps.view.choosing && apps.view.codex_detail;
-            codex_uart_request(showing_detail ? apps.view.codex_id : NULL, apps.view.codex_page, now / 1000);
+            bool showing_agents = apps.view.current == CLAWDOCK_CODEX_APP && !apps.view.choosing;
+            if (!showing_agents) {
+                sessions_clawd_pause(&agents_clawd);
+            } else if (state.awake) {
+                if (!was_in_agents) codex_uart_summary(&codex, NULL, now_ms);
+                sessions_clawd_update(&agents_clawd, &codex, pet_requests != apps.view.sessions_clawd_requests,
+                                      apps.view.sessions_clawd_stick_x, now_ms);
+                state.agents_clawd = agents_clawd.view;
+                state.agents_clawd_patrol_ends_ms = agents_clawd.patrol_ends_ms;
+            }
+            pet_requests = apps.view.sessions_clawd_requests;
+            bool showing_detail = showing_agents && apps.view.codex_detail;
+            codex_uart_request(showing_detail ? apps.view.codex_id : NULL, apps.view.codex_page, now_ms);
             state.app = apps.view;
             if (display_queue) xQueueOverwrite(display_queue, &state);
         }

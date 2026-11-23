@@ -56,10 +56,19 @@ typedef struct {
 } codex_detail_t;
 
 typedef struct {
+    int64_t received_ms;
+    bool sources_unavailable;
     unsigned count;
     unsigned detail_pages;
     uint8_t ids[CODEX_MAX_ROWS][CODEX_ID_BYTES];
+    uint8_t states[CODEX_MAX_ROWS];
 } codex_summary_t;
+
+static inline bool codex_summary_is_current(const codex_summary_t *sessions, int64_t now_ms)
+{
+    return sessions && sessions->received_ms && !sessions->sources_unavailable &&
+           now_ms - sessions->received_ms <= CODEX_TIMEOUT_MS;
+}
 
 typedef struct {
     size_t used;

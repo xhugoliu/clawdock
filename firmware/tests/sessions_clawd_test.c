@@ -4,7 +4,7 @@
 #include "sessions_clawd.h"
 
 static sessions_clawd_t clawd;
-static codex_snapshot_t snapshot = { .available = true };
+static codex_summary_t snapshot;
 static int64_t now_ms = 1000;
 
 static void publish(void)
@@ -22,8 +22,8 @@ static void update(int elapsed_ms)
 
 static void row(unsigned index, unsigned id, uint8_t status)
 {
-    snapshot.rows[index].id[0] = id;
-    snapshot.rows[index].session.state = status;
+    snapshot.ids[index][0] = id;
+    snapshot.states[index] = status;
 }
 
 static clawd_pose_t assert_action(unsigned mask, int64_t previous_start)
@@ -37,8 +37,7 @@ static clawd_pose_t assert_action(unsigned mask, int64_t previous_start)
 static void test_patrol(void)
 {
     sessions_clawd_t patrol = {0};
-    codex_snapshot_t active = { .available = true, .received_ms = 1000, .count = 1,
-        .rows = {{ .id = {9}, .session = { .state = CODEX_RUNNING } }} };
+    codex_summary_t active = { .received_ms = 1000, .count = 1, .ids = {{9}}, .states = {CODEX_RUNNING} };
     sessions_clawd_update(&patrol, &active, false, 0, 1000);
     assert(patrol.view.pose == CLAWD_WALKING);
     const int left = UI_LEFT_MARGIN + 60, right = UI_WIDTH - 60;
@@ -49,6 +48,7 @@ static void test_patrol(void)
     bool varied_walk = false, varied_breath = false, paused_at_edge = false, turned_midway = false;
 
     for (int64_t now = 1050; now < 241000; now += 50) {
+        if ((now - 1000) % 4000 == 0) active.received_ms = now;
         clawd_view_t before = patrol.view;
         sessions_clawd_update(&patrol, &active, false, 0, now);
         if (patrol.view.pose == CLAWD_IDLE) {
@@ -74,7 +74,7 @@ static void test_patrol(void)
 static void test_pet(void)
 {
     sessions_clawd_t pet = {0};
-    codex_snapshot_t sessions = { .available = true, .received_ms = 1000 };
+    codex_summary_t sessions = { .received_ms = 1000 };
     sessions_clawd_update(&pet, &sessions, false, 0, 1000);
     assert(pet.view.pose == CLAWD_WALKING);
     int x = pet.view.x;
@@ -91,7 +91,8 @@ static void test_pet(void)
 
     sessions.count = 1;
     sessions.received_ms = 3500;
-    sessions.rows[0] = (codex_row_t){ .id = {2}, .session = { .state = CODEX_RUNNING } };
+    sessions.ids[0][0] = 2;
+    sessions.states[0] = CODEX_RUNNING;
     sessions_clawd_update(&pet, &sessions, true, 0, 3500);
     assert(pet.view.pose_started_ms == 3500 && pet.pending == SESSIONS_CLAWD_STARTED);
     int64_t end = pet.action_ends_ms;
@@ -130,10 +131,35 @@ static void test_waiting_for_mac(void)
     assert(!pet.last_update_ms && !pet.action_ends_ms);
 }
 
+static void test_connection_loss_and_recovery(void)
+{
+    sessions_clawd_t pet = {0};
+    codex_summary_t sessions = { .received_ms = 1000, .count = 1, .ids = {{9}}, .states = {CODEX_RUNNING} };
+    sessions_clawd_update(&pet, &sessions, false, 0, 1000);
+    assert(pet.view.pose == CLAWD_WALKING);
+
+    sessions.sources_unavailable = true;
+    for (int64_t now = 1050; now <= 7000; now += 50)
+        sessions_clawd_update(&pet, &sessions, false, 0, now);
+    assert(pet.view.pose == CLAWD_SLEEPING && pet.view.x == UI_WIDTH / 2);
+
+    sessions.sources_unavailable = false;
+    sessions.received_ms = 7050;
+    for (int64_t now = 7050; now <= 15050; now += 50)
+        sessions_clawd_update(&pet, &sessions, false, 0, now);
+    assert(pet.view.pose != CLAWD_SLEEPING);
+
+    /* The last known running row stays cached while the pet naps. */
+    for (int64_t now = 15100; now <= 22000; now += 50)
+        sessions_clawd_update(&pet, &sessions, false, 0, now);
+    assert(pet.view.pose == CLAWD_SLEEPING && pet.view.x == UI_WIDTH / 2);
+    assert(pet.sessions[0].state == CODEX_RUNNING);
+}
+
 static void test_manual_walk(void)
 {
     sessions_clawd_t pet = {0};
-    codex_snapshot_t sessions = { .available = true, .received_ms = 1000 };
+    codex_summary_t sessions = { .received_ms = 1000 };
     sessions_clawd_update(&pet, &sessions, false, 139, 1000);
     assert(pet.view.pose == CLAWD_WALKING && pet.view.x == UI_LEFT_MARGIN + 60);
     int left = pet.view.x;
@@ -149,7 +175,8 @@ static void test_manual_walk(void)
 
     sessions.count = 1;
     sessions.received_ms = 1350;
-    sessions.rows[0] = (codex_row_t){ .id = {2}, .session = { .state = CODEX_RUNNING } };
+    sessions.ids[0][0] = 2;
+    sessions.states[0] = CODEX_RUNNING;
     sessions_clawd_update(&pet, &sessions, false, 1000, 1350);
     assert(pet.view.pose == CLAWD_WALKING && pet.pending == SESSIONS_CLAWD_STARTED);
     sessions_clawd_update(&pet, &sessions, false, 0, 1400);
@@ -164,6 +191,7 @@ int main(void)
     test_patrol();
     test_pet();
     test_waiting_for_mac();
+    test_connection_loss_and_recovery();
     test_manual_walk();
     const unsigned started = (1U << CLAWD_GROOVING) | (1U << CLAWD_JUGGLING) | (1U << CLAWD_EUREKA);
     const unsigned done = (1U << CLAWD_HAPPY) | (1U << CLAWD_COFFEE) | (1U << CLAWD_SNACK);

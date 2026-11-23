@@ -55,13 +55,6 @@ static esp_err_t submit_frame(void)
     return ESP_OK;
 }
 
-esp_err_t lab_display_sleep_warning(void)
-{
-    if (!fb) return ESP_ERR_INVALID_STATE;
-    app_ui_sleep_warning(fb);
-    return submit_frame();
-}
-
 esp_err_t lab_display_init(void)
 {
     static esp_ldo_channel_handle_t power;

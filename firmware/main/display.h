@@ -13,9 +13,10 @@ typedef struct {
     int normalized_x;
     int normalized_y;
     bool awake;
-    bool sleep_warning;
     lab_touch_state_t touch;
     app_view_t app;
+    clawd_view_t agents_clawd;
+    int64_t agents_clawd_patrol_ends_ms;
     const codex_snapshot_t *codex;
     const codex_detail_t *codex_detail;
     int64_t now_ms;
@@ -26,5 +27,4 @@ typedef struct {
 
 esp_err_t lab_display_init(void);
 esp_err_t lab_display_update(const lab_display_state_t *state);
-esp_err_t lab_display_sleep_warning(void);
 esp_err_t lab_display_set_awake(bool awake);

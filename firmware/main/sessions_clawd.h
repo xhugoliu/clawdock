@@ -28,5 +28,5 @@ typedef struct {
 } sessions_clawd_t;
 
 void sessions_clawd_pause(sessions_clawd_t *clawd);
-void sessions_clawd_update(sessions_clawd_t *clawd, const codex_snapshot_t *snapshot,
+void sessions_clawd_update(sessions_clawd_t *clawd, const codex_summary_t *sessions,
                            bool pet_requested, int stick_x, int64_t now_ms);

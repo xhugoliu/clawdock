@@ -1,6 +1,5 @@
 #include "app_ui.h"
 #include "app_ui_theme.h"
-#include "sessions_clawd.h"
 #include "miniz.h"
 #include <stdio.h>
 #include <string.h>
@@ -13,8 +12,6 @@
 #define CONTENT_BOTTOM (FOOTER_BASELINE - 30)
 
 static uint16_t *fb; /* Used only by the display task. */
-static sessions_clawd_t sessions_clawd;
-static unsigned sessions_clawd_requests;
 static const char apps_hint[] = "Apps: hold all 3 keys";
 static const char move_hint[] = "Stick: up / down";
 static const char pet_hint[] = "SW1/2: pet";
@@ -555,41 +552,31 @@ static void draw_clawd(const lab_display_state_t *state, uint16_t body_color)
            pet->pose == CLAWD_SLEEPING ? "Stick press: wake" : "Stick press: sleep");
 }
 
-void app_ui_sleep_warning(uint16_t *buffer)
+static void draw_agents_clawd(const lab_display_state_t *state, uint16_t body_color)
 {
-    sessions_clawd_pause(&sessions_clawd);
-    begin_frame(buffer);
-    const char *label = "Zzz...";
-    text_at((WIDTH - text_width(label, UI_FONT_TITLE)) / 2, HEIGHT / 2 + 12, label, UI_FONT_TITLE, UI_TEXT);
+    enum { CAMEO_PIXEL_STEP = 2 };
+    const sprite_area_t stage = {UI_LEFT_MARGIN, UI_CONTENT_TOP, WIDTH, CONTENT_BOTTOM};
+    const clawd_view_t *pet = &state->agents_clawd;
+    int64_t duration = pet->pose == CLAWD_IDLE ? state->agents_clawd_patrol_ends_ms - pet->pose_started_ms : 0;
+    int x = fit_clawd_x(pet, CAMEO_PIXEL_STEP, duration, &stage);
+    draw_clawd_sprite(pet, x, CONTENT_BOTTOM - 12, CAMEO_PIXEL_STEP, state->now_ms, &stage, body_color);
 }
 
 static void render(uint16_t *buffer, const lab_display_state_t *state, uint16_t clawd_body_color)
 {
-    bool pet_requested = sessions_clawd_requests != state->app.sessions_clawd_requests;
-    sessions_clawd_requests = state->app.sessions_clawd_requests;
     begin_frame(buffer);
     if (state->app.choosing) {
-        sessions_clawd_pause(&sessions_clawd);
         draw_selector(&state->app);
         return;
     }
     switch (state->app.current) {
         case CLAWDOCK_INPUT_APP: draw_diagnostics(state); break;
         case CLAWDOCK_MOUSE_APP: draw_mouse(&state->app); break;
-        case CLAWDOCK_CODEX_APP: draw_codex(state); break;
+        case CLAWDOCK_CODEX_APP:
+            draw_codex(state);
+            draw_agents_clawd(state, clawd_body_color);
+            break;
         case CLAWDOCK_CLAWD_APP: draw_clawd(state, clawd_body_color); break;
-    }
-    if (state->app.current == CLAWDOCK_CODEX_APP) {
-        enum { CAMEO_PIXEL_STEP = 2 };
-        const sprite_area_t stage = {UI_LEFT_MARGIN, UI_CONTENT_TOP, WIDTH, CONTENT_BOTTOM};
-        sessions_clawd_update(&sessions_clawd, state->codex, pet_requested, state->app.sessions_clawd_stick_x, state->now_ms);
-        const clawd_view_t *pet = &sessions_clawd.view;
-        int64_t duration = pet->pose == CLAWD_IDLE ? sessions_clawd.patrol_ends_ms - pet->pose_started_ms : 0;
-        int x = fit_clawd_x(pet, CAMEO_PIXEL_STEP, duration, &stage);
-        draw_clawd_sprite(pet, x, CONTENT_BOTTOM - 12, CAMEO_PIXEL_STEP, state->now_ms,
-                          &stage, clawd_body_color);
-    } else {
-        sessions_clawd_pause(&sessions_clawd);
     }
 }
 

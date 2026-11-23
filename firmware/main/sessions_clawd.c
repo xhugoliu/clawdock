@@ -63,31 +63,31 @@ static sessions_clawd_event_t session_event(uint8_t previous, uint8_t current)
     }
 }
 
-static void read_snapshot(sessions_clawd_t *clawd, const codex_snapshot_t *snapshot)
+static void read_sessions(sessions_clawd_t *clawd, const codex_summary_t *sessions)
 {
     bool seed = clawd->last_snapshot_ms == 0;
-    clawd->last_snapshot_ms = snapshot->received_ms;
+    clawd->last_snapshot_ms = sessions->received_ms;
     clawd->running = false;
-    for (unsigned row = 0; row < snapshot->count; ++row) {
-        const codex_row_t *session = &snapshot->rows[row];
-        if (session->session.state == CODEX_RUNNING) clawd->running = true;
+    for (unsigned row = 0; row < sessions->count; ++row) {
+        uint8_t state = sessions->states[row];
+        if (state == CODEX_RUNNING) clawd->running = true;
         sessions_clawd_session_t *known = NULL, *oldest = &clawd->sessions[0];
         for (unsigned i = 0; i < sizeof(clawd->sessions) / sizeof(clawd->sessions[0]); ++i) {
             sessions_clawd_session_t *entry = &clawd->sessions[i];
-            if (entry->seen_ms && memcmp(entry->id, session->id, CODEX_ID_BYTES) == 0) {
+            if (entry->seen_ms && memcmp(entry->id, sessions->ids[row], CODEX_ID_BYTES) == 0) {
                 known = entry;
                 break;
             }
             if (entry->seen_ms < oldest->seen_ms) oldest = entry;
         }
         if (!seed) {
-            sessions_clawd_event_t event = session_event(known ? known->state : 0, session->session.state);
+            sessions_clawd_event_t event = session_event(known ? known->state : 0, state);
             if (event > clawd->pending) clawd->pending = event;
         }
         if (!known) known = oldest;
-        memcpy(known->id, session->id, CODEX_ID_BYTES);
-        known->state = session->session.state;
-        known->seen_ms = snapshot->received_ms;
+        memcpy(known->id, sessions->ids[row], CODEX_ID_BYTES);
+        known->state = state;
+        known->seen_ms = sessions->received_ms;
     }
 }
 
@@ -103,10 +103,12 @@ static bool walk(sessions_clawd_t *clawd, int speed, int target, int elapsed, in
     return next != position && next == target;
 }
 
-void sessions_clawd_update(sessions_clawd_t *clawd, const codex_snapshot_t *snapshot,
+void sessions_clawd_update(sessions_clawd_t *clawd, const codex_summary_t *sessions,
                            bool pet_requested, int stick_x, int64_t now_ms)
 {
-    if (snapshot && clawd->last_snapshot_ms != snapshot->received_ms) read_snapshot(clawd, snapshot);
+    bool sessions_current = codex_summary_is_current(sessions, now_ms);
+    if (sessions_current && clawd->last_snapshot_ms != sessions->received_ms)
+        read_sessions(clawd, sessions);
 
     int64_t elapsed = clawd->last_update_ms ? now_ms - clawd->last_update_ms : 0;
     clawd->last_update_ms = now_ms;
@@ -138,7 +140,7 @@ void sessions_clawd_update(sessions_clawd_t *clawd, const codex_snapshot_t *snap
     }
 
     int position = clawd->position_millipixels;
-    if (!clawd->running) {
+    if (!sessions_current || !clawd->running) {
         clawd->patrol_ends_ms = 0;
         if (position != SLEEP_CENTER) {
             int speed = position < SLEEP_CENTER ? WALK_SPEED : -WALK_SPEED;

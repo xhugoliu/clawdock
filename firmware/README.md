@@ -10,7 +10,7 @@
 
 三键并击识别窗口约 180 ms，从第一个 SW 键消抖后开始。确认三个键均按下时立即打开选择器，这次并击由选择器处理。未形成并击时，缓存的事件按顺序交给当前应用。选择器打开期间，应用输入和诊断输出暂停。
 
-应用作为前台模块编入固件。输入采集、摇杆校准、显示与休眠由系统统一管理。换到其他应用时重置旧应用运行状态，Clawd 桌宠状态保留到本次开机结束。
+应用作为前台模块编入固件，共用输入采集、摇杆校准和显示。换到其他应用时重置旧应用运行状态，Clawd 桌宠状态保留到本次开机结束。
 
 ## 设备应用
 
@@ -69,9 +69,9 @@ USB-UART 路径上的光标、左右键、滚轮、浏览器前进后退与触�
 
 ## 屏幕休眠
 
-所有应用共用休眠计时。连续 29 分钟无输入时显示 `Zzz...`，满 30 分钟关闭背光、让面板休眠并暂停绘制，设备和输入采样继续运行。实体按键改变状态、移动摇杆或触点变化会重置计时。按键持续按住、摇杆或触点停在原位，以及会话更新时，计时继续。
+只有 Agents 会自动熄屏。有效会话列表中有运行中的会话时保持亮屏。没有运行中的会话、等待 Mac、掉线或来源不可用时，Clawd 会回到画面底部中央打盹。Clawd 连续打盹且无操作满 10 分钟后直接熄屏。打盹期间，连接状态变化不重置计时。应用选择器、Mouse、Input Lab 和独立 Clawd 页保持常亮。
 
-休眠后的首次输入用于唤醒。随后释放按键和触点、让摇杆回中，再进行应用操作。
+按键改变状态、移动摇杆或触点变化会重置计时。休眠时关闭背光和面板，设备仍采样输入并继续轮询 Mac。收到包含运行会话的有效列表时会自动亮屏。手动唤醒的首次输入只用来亮屏，释放按键和触点、让摇杆回中后即可操作。
 
 ## 构建
 
@@ -99,8 +99,8 @@ python3 -m venv .venv
 cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/app_manager_test.c firmware/main/app_manager.c firmware/main/app_runtime.c firmware/main/mouse.c firmware/main/clawd.c -o /tmp/clawdock-app-manager-test
 /tmp/clawdock-app-manager-test
 
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/screen_idle_test.c firmware/main/screen_idle.c -o /tmp/clawdock-screen-idle-test
-/tmp/clawdock-screen-idle-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/agents_screen_test.c firmware/main/agents_screen.c -o /tmp/clawdock-agents-screen-test
+/tmp/clawdock-agents-screen-test
 
 cc -std=c11 -Wall -Wextra -Werror -Ifirmware/main firmware/tests/sessions_clawd_test.c firmware/main/sessions_clawd.c firmware/main/clawd.c -o /tmp/clawdock-sessions-clawd-test
 /tmp/clawdock-sessions-clawd-test
