@@ -16,7 +16,7 @@ static void mouse_app_button(app_runtime_t *runtime, unsigned button, bool press
 
 /* Apps are built into the firmware. Only the active app has a runtime. */
 static const app_definition_t apps[CLAWDOCK_APP_COUNT] = {
-    [CLAWDOCK_CODEX_APP] = { .name = "SESSIONS", .title = "Sessions" },
+    [CLAWDOCK_CODEX_APP] = { .name = "AGENTS", .title = "Agents" },
     [CLAWDOCK_MOUSE_APP] = { .name = "MOUSE", .title = "Mouse", .button = mouse_app_button },
     [CLAWDOCK_INPUT_APP] = { .name = "INPUT LAB", .title = "Input Lab" },
     [CLAWDOCK_CLAWD_APP] = { .name = "CLAWD", .title = "Clawd" },

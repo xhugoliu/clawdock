@@ -6,18 +6,18 @@ ClawDock 是基于 HachimoDock 和 ESP32-P4 的实体桌宠。Clawd 会随编程
 
 预览使用固件渲染器的原始配色，四周留白按文档展示调整。实机显示对 Clawd 的主体橙色做了屏幕补偿。会话内容和输入状态使用示例数据。
 
-**会话列表与详情**
+**Agents 会话列表与详情**
 
 <p>
-  <a href="docs/screenshots/sessions.png"><img src="docs/screenshots/sessions.png" width="49%" alt="Sessions 列表显示三张会话卡片，Clawd 在右下角吃饼干"></a>
+  <a href="docs/screenshots/sessions.png"><img src="docs/screenshots/sessions.png" width="49%" alt="Agents 列表显示三张会话卡片，Clawd 在右下角吃饼干"></a>
   <a href="docs/screenshots/session-detail.png"><img src="docs/screenshots/session-detail.png" width="49%" alt="按 SW3 展开选中的会话卡片，显示八行正文和页码，Clawd 举起灯泡"></a>
 </p>
 
 **掉线与等待连接**
 
 <p>
-  <a href="docs/screenshots/sessions-offline.png"><img src="docs/screenshots/sessions-offline.png" width="49%" alt="Sessions 页头显示 Mac is offline，保留三张会话卡片，Clawd 戴着耳机"></a>
-  <a href="docs/screenshots/sessions-waiting.png"><img src="docs/screenshots/sessions-waiting.png" width="49%" alt="Sessions 页头显示 Waiting for Mac，Clawd 在底部中央打盹"></a>
+  <a href="docs/screenshots/sessions-offline.png"><img src="docs/screenshots/sessions-offline.png" width="49%" alt="Agents 页头显示 Mac is offline，保留三张会话卡片，Clawd 戴着耳机"></a>
+  <a href="docs/screenshots/sessions-waiting.png"><img src="docs/screenshots/sessions-waiting.png" width="49%" alt="Agents 页头显示 Waiting for Mac，Clawd 在底部中央打盹"></a>
 </p>
 
 **Clawd 桌宠与应用选择器**
@@ -36,7 +36,7 @@ ClawDock 是基于 HachimoDock 和 ESP32-P4 的实体桌宠。Clawd 会随编程
 
 ## 快速开始
 
-运行 ClawDock 固件的设备开机进入 `SESSIONS`。同时按住 SW1、SW2、SW3 打开应用选择器，用摇杆上下选择，松开三个键后切换应用。
+运行 ClawDock 固件的设备开机进入 `Agents`。同时按住 SW1、SW2、SW3 打开应用选择器，用摇杆上下选择，松开三个键后切换应用。
 
 通过 CH343 USB-UART 将设备连接到 Mac，在仓库根目录运行以下命令。菜单栏应用负责会话同步、鼠标桥接和 Clawd 校时。
 
