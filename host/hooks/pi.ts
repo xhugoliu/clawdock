@@ -8,12 +8,17 @@ export default function observeSessions(pi: ExtensionAPI) {
     let reply: string | undefined;
     let stopReason: string | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let waitingForAnswer = false;
 
     function publish(ctx: ExtensionContext, state: string) {
         if (startedAt === undefined) return;
         const session = ctx.sessionManager;
         const title = session.getSessionName() || basename(session.getCwd()) || 'Pi';
         events.write({ id: session.getSessionId(), title, state, startedAt, updatedAt: Date.now(), reply });
+    }
+
+    function publishActive(ctx: ExtensionContext) {
+        publish(ctx, waitingForAnswer ? 'waitingForAnswer' : 'running');
     }
 
     function finish(ctx: ExtensionContext, state: string) {
@@ -23,24 +28,35 @@ export default function observeSessions(pi: ExtensionAPI) {
         startedAt = undefined;
         reply = undefined;
         stopReason = undefined;
+        waitingForAnswer = false;
     }
 
     pi.on('session_start', () => { try { events.prune(); } catch {} });
     pi.on('agent_start', (_event, ctx) => {
         if (startedAt === undefined) {
             startedAt = Date.now();
-            heartbeat = setInterval(() => publish(ctx, 'running'), 30_000);
+            heartbeat = setInterval(() => publishActive(ctx), 30_000);
             heartbeat.unref();
         }
         stopReason = undefined;
-        publish(ctx, 'running');
+        publishActive(ctx);
+    });
+    pi.on('ui_prompt_start', ({ kind }, ctx) => {
+        if (startedAt === undefined || (kind !== 'select' && kind !== 'custom')) return;
+        waitingForAnswer = true;
+        publishActive(ctx);
+    });
+    pi.on('ui_prompt_end', (_event, ctx) => {
+        if (!waitingForAnswer) return;
+        waitingForAnswer = false;
+        publishActive(ctx);
     });
     pi.on('message_end', ({ message }, ctx) => {
         if (message.role !== 'assistant' || startedAt === undefined) return;
         stopReason = message.stopReason;
         const text = message.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
         reply = sessionCache.visibleReply(text) ?? reply;
-        publish(ctx, 'running');
+        publishActive(ctx);
     });
     pi.on('agent_settled', (event, ctx) => {
         const state = event.aborted || stopReason === 'aborted' ? 'cancelled' :

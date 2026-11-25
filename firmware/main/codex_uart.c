@@ -27,7 +27,7 @@ static void receive_task(void *unused)
     (void)unused;
     uint8_t bytes[512];
     int64_t last_byte_ms = 0;
-    int previous_active = -1, previous_count = -1, previous_available = -1;
+    int previous_active = -1, previous_waiting = -1, previous_count = -1, previous_available = -1;
     int previous_page = -1, previous_pages = -1;
     while (true) {
         int count = uart_read_bytes(CONFIG_ESP_CONSOLE_UART_NUM, bytes, sizeof(bytes), pdMS_TO_TICKS(40));
@@ -70,13 +70,19 @@ static void receive_task(void *unused)
             if (incoming.list.available) latest = incoming.list;
             xSemaphoreGive(lock);
 
-            int active = 0;
-            for (unsigned j = 0; j < incoming.list.count; ++j) active += incoming.list.rows[j].session.state == CODEX_RUNNING;
+            int active = 0, waiting = 0;
+            for (unsigned j = 0; j < incoming.list.count; ++j) {
+                uint8_t state = incoming.list.rows[j].session.state;
+                active += state == CODEX_RUNNING;
+                waiting += state == CODEX_WAITING_FOR_ANSWER;
+            }
             if (previous_count != (int)incoming.list.count || previous_active != active ||
-                previous_available != incoming.list.available) {
-                printf("JT_CODEX SYNC rows=%u active=%d available=%d\n", incoming.list.count, active, incoming.list.available);
+                previous_available != incoming.list.available || previous_waiting != waiting) {
+                printf("JT_CODEX SYNC rows=%u active=%d available=%d waiting=%d\n",
+                       incoming.list.count, active, incoming.list.available, waiting);
                 previous_count = (int)incoming.list.count;
                 previous_active = active;
+                previous_waiting = waiting;
                 previous_available = incoming.list.available;
             }
         }

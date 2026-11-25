@@ -276,6 +276,14 @@ static void codex_status(int right, int baseline, uint8_t status, int64_t now_ms
             status_stroke(x - 6, y - 6, 1, 1, 13, UI_SESSION_FAILED);
             status_stroke(x - 6, y + 6, 1, -1, 13, UI_SESSION_FAILED);
             break;
+        case CODEX_WAITING_FOR_ANSWER:
+            status_stroke(x - 5, y - 4, 1, -1, 3, UI_SESSION_WAITING);
+            status_stroke(x - 2, y - 6, 1, 0, 5, UI_SESSION_WAITING);
+            status_stroke(x + 3, y - 5, 0, 1, 4, UI_SESSION_WAITING);
+            status_stroke(x + 3, y - 1, -1, 1, 4, UI_SESSION_WAITING);
+            status_stroke(x, y + 3, 0, 1, 2, UI_SESSION_WAITING);
+            rect(x, y + 7, 2, 2, UI_SESSION_WAITING);
+            break;
         default: status_stroke(x - 5, y, 1, 0, 11, UI_SECONDARY); break;
     }
 }
@@ -305,6 +313,7 @@ enum {
 
 static const char *codex_reply_placeholder(const codex_session_t *session)
 {
+    if (session->state == CODEX_WAITING_FOR_ANSWER) return "Waiting for your answer";
     return session->state == CODEX_RUNNING ? "Waiting for a reply" : "No reply available";
 }
 

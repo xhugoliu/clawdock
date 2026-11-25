@@ -53,8 +53,8 @@ void sessions_clawd_pause(sessions_clawd_t *clawd)
 static sessions_clawd_event_t session_event(uint8_t previous, uint8_t current)
 {
     if (previous == current) return SESSIONS_CLAWD_NONE;
-    if (current == CODEX_RUNNING) return SESSIONS_CLAWD_STARTED;
-    if (previous != CODEX_RUNNING) return SESSIONS_CLAWD_NONE;
+    if (current == CODEX_RUNNING && !codex_state_is_active(previous)) return SESSIONS_CLAWD_STARTED;
+    if (!codex_state_is_active(previous)) return SESSIONS_CLAWD_NONE;
     switch (current) {
         case CODEX_COMPLETED: return SESSIONS_CLAWD_COMPLETED;
         case CODEX_FAILED: return SESSIONS_CLAWD_FAILED;

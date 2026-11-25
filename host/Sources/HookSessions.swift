@@ -17,6 +17,7 @@ final class HookSessions {
         var reply: String?
         var activity: Date?
         var interruptedAt: Date?
+        var waitingForAnswer = false
     }
 
     private let fm = FileManager.default
@@ -57,8 +58,9 @@ final class HookSessions {
                     if let interruptedAt = transcript.interruptedAt {
                         state = .cancelled
                         updatedAt = interruptedAt
-                    } else if let activity = transcript.activity {
-                        updatedAt = max(updatedAt, activity)
+                    } else {
+                        if transcript.waitingForAnswer { state = .waitingForAnswer }
+                        if let activity = transcript.activity { updatedAt = max(updatedAt, activity) }
                     }
                 }
                 guard updatedAt >= cutoff, updatedAt.timeIntervalSince(now) <= 60 else { continue }
@@ -86,6 +88,7 @@ final class HookSessions {
         guard (try? handle.seek(toOffset: start)) != nil,
               let data = try? handle.read(upToCount: capacity), let end = data.lastIndex(of: 10) else { return nil }
         var result = Transcript()
+        var pendingQuestions: Set<String> = []
         for line in data[..<end].split(separator: 10).dropFirst(start > 0 ? 1 : 0) {
             guard let row = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
                   row["sessionId"] as? String == event.id,
@@ -104,19 +107,31 @@ final class HookSessions {
                 let text = message["content"] as? String ?? parts.joined(separator: "\n")
                 if message["role"] as? String == "assistant", row["isApiErrorMessage"] as? Bool != true {
                     if let reply = AgentSession.visibleReply(text) { result.reply = reply }
-                } else if message["role"] as? String == "user", row["promptSource"] == nil,
-                          text == "[Request interrupted by user]" || text == "[Request interrupted by user for tool use]" {
-                    result.interruptedAt = date
+                    for block in blocks where block["type"] as? String == "tool_use" && block["name"] as? String == "AskUserQuestion" {
+                        if let id = block["id"] as? String, AgentSession.hasQuestionChoices(block["input"] as? [String: Any]) {
+                            pendingQuestions.insert(id)
+                        }
+                    }
+                } else if message["role"] as? String == "user" {
+                    for block in blocks where block["type"] as? String == "tool_result" {
+                        if let id = block["tool_use_id"] as? String { pendingQuestions.remove(id) }
+                    }
+                    if row["promptSource"] == nil,
+                       text == "[Request interrupted by user]" || text == "[Request interrupted by user for tool use]" {
+                        result.interruptedAt = date
+                    }
                 }
             default: continue
             }
         }
+        result.waitingForAnswer = !pendingQuestions.isEmpty
         return result
     }
 
     private static func state(_ value: String) -> AgentSessionState? {
         switch value {
         case "running": return .running
+        case "waitingForAnswer": return .waitingForAnswer
         case "completed": return .completed
         case "failed": return .failed
         case "cancelled": return .cancelled

@@ -59,7 +59,7 @@ static bool read_session(reader_t *reader, codex_session_t *session)
 {
     if (reader->at == reader->end) return false;
     session->state = *reader->at++;
-    if (session->state < CODEX_RUNNING || session->state > CODEX_CANCELLED) return false;
+    if (session->state < CODEX_RUNNING || session->state > CODEX_WAITING_FOR_ANSWER) return false;
     return read_bitmap(reader, session->title, CODEX_TITLE_BYTES, NULL);
 }
 

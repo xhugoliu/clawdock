@@ -9,7 +9,7 @@ final class CodexSessions {
         "task_failed": .failed, "turn_failed": .failed,
         "turn_aborted": .cancelled, "turn_cancelled": .cancelled
     ]
-    private static let lifecycleMarkers = (["turn_context"] + startEvents + endStates.keys)
+    private static let lifecycleMarkers = (["turn_context", "request_user_input", "function_call_output"] + startEvents + endStates.keys)
         .map { Data("\"\($0)\"".utf8) }
 
     private struct Rollout {
@@ -23,6 +23,7 @@ final class CodexSessions {
         var state: AgentSessionState?
         var modified = Date.distantPast
         var reply: String?
+        var pendingQuestions: Set<String> = []
     }
 
     private let fm = FileManager.default
@@ -95,8 +96,9 @@ final class CodexSessions {
 
         return latest.values.compactMap { row in
             guard let state = row.state else { return nil }
+            let displayedState: AgentSessionState = state == .running && !row.pendingQuestions.isEmpty ? .waitingForAnswer : state
             return AgentSession(id: row.id, source: .codex, title: titles[row.id] ?? row.project,
-                                state: state, startedAt: row.startedAt, updatedAt: row.updatedAt, reply: row.reply)
+                                state: displayedState, startedAt: row.startedAt, updatedAt: row.updatedAt, reply: row.reply)
         }
     }
 
@@ -153,6 +155,7 @@ final class CodexSessions {
         var fragment: Data? = Data()
         var transitions: [[String: Any]] = []
         var contextTurn: String?
+        var answeredQuestions: Set<String> = []
 
         // Recover lifecycle records from the skipped region in blocks. A context can repeat
         // within a turn, so keep looking for its start or the previous turn's boundary.
@@ -181,7 +184,16 @@ final class CodexSessions {
                       fractionalTime.date(from: timestamp) != nil || time.date(from: timestamp) != nil else { continue }
 
                 let event = payload["type"] as? String ?? ""
-                if type == "event_msg" && Self.endStates[event] != nil {
+                if type == "response_item", event == "function_call_output", let call = payload["call_id"] as? String {
+                    answeredQuestions.insert(call)
+                    if row.pendingQuestions.contains(call) {
+                        transitions.append(["type": type, "timestamp": timestamp,
+                                            "payload": ["type": event, "call_id": call]])
+                    }
+                } else if type == "response_item", event == "function_call", payload["name"] as? String == "request_user_input",
+                          let call = payload["call_id"] as? String, !answeredQuestions.contains(call) {
+                    transitions.append(record)
+                } else if type == "event_msg" && Self.endStates[event] != nil {
                     transitions.append(record)
                 } else if (type == "turn_context" || (type == "event_msg" && Self.startEvents.contains(event))),
                           let turn = payload["turn_id"] as? String {
@@ -210,20 +222,34 @@ final class CodexSessions {
                 row.startedAt = date
                 row.state = .running
                 row.reply = nil
+                row.pendingQuestions.removeAll()
             }
             guard row.state == .running else { return }
         } else if type == "response_item" {
-            guard row.state == .running, event == "message", payload["role"] as? String == "assistant",
-                  visiblePhase(payload), let content = payload["content"] as? [[String: Any]],
-                  let text = replyText(content.compactMap { part -> String? in
-                      guard part["type"] as? String == "output_text" else { return nil }
-                      return part["text"] as? String
-                  }.joined(separator: "\n")) else { return }
-            row.reply = text
+            guard row.state == .running, turn == nil || turn == row.turn else { return }
+            switch event {
+            case "function_call":
+                guard payload["name"] as? String == "request_user_input", let call = payload["call_id"] as? String,
+                      let arguments = payload["arguments"] as? String,
+                      AgentSession.hasQuestionChoices(object(Data(arguments.utf8))) else { return }
+                row.pendingQuestions.insert(call)
+            case "function_call_output":
+                guard let call = payload["call_id"] as? String, row.pendingQuestions.remove(call) != nil else { return }
+            case "message":
+                guard payload["role"] as? String == "assistant", visiblePhase(payload),
+                      let content = payload["content"] as? [[String: Any]],
+                      let text = replyText(content.compactMap { part -> String? in
+                          guard part["type"] as? String == "output_text" else { return nil }
+                          return part["text"] as? String
+                      }.joined(separator: "\n")) else { return }
+                row.reply = text
+            default: return
+            }
         } else if let state = Self.endStates[event] {
             if let turn, let current = row.turn, turn != current { return }
             row.turn = turn ?? row.turn
             row.state = state
+            row.pendingQuestions.removeAll()
             if state == .completed, let text = replyText(payload["last_agent_message"] as? String) { row.reply = text }
         } else {
             switch event {

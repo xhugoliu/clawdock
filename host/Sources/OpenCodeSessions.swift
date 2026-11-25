@@ -47,6 +47,19 @@ final class OpenCodeSessions: @unchecked Sendable {
 
     private struct Activity: Decodable { let type: String }
 
+    private struct Form: Decodable {
+        struct Field: Decodable {
+            struct Option: Decodable { let value: String }
+            let options: [Option]?
+            let hidden: Bool?
+        }
+        let fields: [Field]
+
+        var hasChoices: Bool {
+            fields.contains { $0.hidden != true && $0.options?.isEmpty == false }
+        }
+    }
+
     private final class NoRedirects: NSObject, URLSessionTaskDelegate {
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
@@ -117,11 +130,25 @@ final class OpenCodeSessions: @unchecked Sendable {
 
         let prior = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0) })
         let cutoff = now.addingTimeInterval(-AgentSessions.activeFor)
+        let mainSessions = summaries.filter { $0.parentID == nil && $0.time.archived == nil && Self.isSessionID($0.id) }
+        let activeMainIDs = active.intersection(mainSessions.map(\.id))
+        let waiting = await withTaskGroup(of: (String, Bool?).self) { group in
+            for id in activeMainIDs {
+                group.addTask {
+                    let forms = await self.get([Form].self, "/api/session/\(id)/form", from: connection)
+                    return (id, forms.map { $0.contains(where: \.hasChoices) })
+                }
+            }
+            var results: [String: Bool] = [:]
+            for await (id, hasChoices) in group { results[id] = hasChoices }
+            return results
+        }
         var rows: [AgentSession] = []
         var nativeIDs: [UUID: String] = [:]
-        for info in summaries where info.parentID == nil && info.time.archived == nil && Self.isSessionID(info.id) {
+        for info in mainSessions {
             let id = AgentSession.id(for: .openCode, nativeID: info.id)
             guard nativeIDs[id] == nil else { continue }
+            let old = prior[id]
             let running = active.contains(info.id)
             let busy = info.time.busy.map(Self.date)
             let idle = info.time.idle.map(Self.date)
@@ -129,9 +156,10 @@ final class OpenCodeSessions: @unchecked Sendable {
             let startedAt: Date
             let updatedAt: Date
             if running {
-                state = .running
                 let currentBusy = busy.flatMap { time in (idle ?? .distantPast) < time ? time : nil }
-                startedAt = currentBusy ?? (prior[id]?.state == .running ? prior[id]?.startedAt : nil) ?? now
+                startedAt = currentBusy ?? (old?.state.isActive == true ? old?.startedAt : nil) ?? now
+                let wasWaiting = old?.state == .waitingForAnswer && old?.startedAt == startedAt
+                state = (waiting[info.id] ?? wasWaiting) ? .waitingForAnswer : .running
                 updatedAt = max(startedAt, Self.date(info.time.updated))
             } else {
                 guard let idle, idle >= cutoff, (busy ?? .distantPast) <= idle else { continue }
@@ -144,7 +172,6 @@ final class OpenCodeSessions: @unchecked Sendable {
                 startedAt = busy ?? .distantPast
                 updatedAt = idle
             }
-            let old = prior[id]
             let reply = old?.startedAt == startedAt ? old?.reply : nil
             nativeIDs[id] = info.id
             rows.append(AgentSession(id: id, source: .openCode, title: info.title ?? "OpenCode", state: state,
@@ -156,9 +183,9 @@ final class OpenCodeSessions: @unchecked Sendable {
         await withTaskGroup(of: (Int, String?).self) { group in
             for index in rows.indices.prefix(AgentSessions.limit) {
                 let row = rows[index]
-                guard let id = nativeIDs[row.id], row.state == .running || row.updatedAt >= recentEnd else { continue }
+                guard let id = nativeIDs[row.id], row.state.isActive || row.updatedAt >= recentEnd else { continue }
                 let old = prior[row.id]
-                if row.state != .running && old?.state == row.state && old?.updatedAt == row.updatedAt && row.reply != nil {
+                if !row.state.isActive && old?.state == row.state && old?.updatedAt == row.updatedAt && row.reply != nil {
                     continue
                 }
                 group.addTask { (index, await self.reply(id: id, since: row.startedAt, from: connection)) }

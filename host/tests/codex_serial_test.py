@@ -39,6 +39,12 @@ def event(kind, turn, ago=0, **fields):
     return record('event_msg', {'type': kind, 'turn_id': turn, **fields}, ago)
 
 
+choices = {'questions': [
+    {'question': 'Which fruit?', 'options': [{'label': 'Apple'}, {'label': 'Pear'}]},
+    {'question': 'Which toppings?', 'options': [{'label': 'Honey'}, {'label': 'Cheese'}], 'multiSelect': True}
+]}
+
+
 def request(master, line):
     os.write(master, (line + '\n').encode())
     received = bytearray()
@@ -182,6 +188,21 @@ with tempfile.TemporaryDirectory() as temp:
         with second.open('ab') as file:
             file.write(interrupted[30:])
         assert {key: value[0] for key, value in poll(master).items()} == {running: 2, other: 4, long_running: 1}
+
+        question = record('response_item', {'type': 'function_call', 'name': 'request_user_input',
+                                            'call_id': 'fruit', 'arguments': json.dumps(choices)}, 3)
+        with long_log.open('ab') as file:
+            file.write(question + large_result)
+        assert poll(master)[long_running][0] == 5
+        kind, payload = request(master, f'JT_CODEX 4 {long_running} 0')
+        assert kind == 2 and payload[18] == 5
+        with long_log.open('ab') as file:
+            file.write(record('response_item', {'type': 'function_call_output', 'call_id': 'other'}, 2))
+        assert poll(master)[long_running][0] == 5
+        with long_log.open('ab') as file:
+            file.write(record('response_item', {'type': 'function_call_output', 'call_id': 'fruit'}, 2) + large_result)
+        assert poll(master)[long_running][0] == 1
+
         # A completion arriving in an oversized append still closes the already visible turn.
         with long_log.open('ab') as file:
             file.write(event('task_complete', 'long', 1) + large_result + event('token_count', 'long'))
@@ -218,6 +239,7 @@ def mixed_sessions():
     started = int(time.time() * 1000) - 3000
     main_id, child_id = 'ses_main', 'ses_child'
     active = {main_id: {'type': 'running'}, child_id: {'type': 'running'}}
+    forms = []
     info = {'id': main_id, 'title': 'Shared title', 'time': {'busy': started, 'updated': started}}
     child = {'id': child_id, 'parentID': main_id, 'time': {'busy': started, 'updated': started}}
     prior = {'id': 'ses_prior', 'outcome': 'succeeded',
@@ -236,6 +258,8 @@ def mixed_sessions():
                 data = [child, prior] + ([info] if main_id not in active else [])
             elif path == f'/api/session/{main_id}':
                 data = info
+            elif path == f'/api/session/{main_id}/form':
+                data = list(forms)
             elif path == f'/api/session/{main_id}/message':
                 data = [{'type': 'assistant', 'time': {'created': started + 1},
                          'content': [{'type': 'reasoning', 'text': 'hidden'}, {'type': 'text', 'text': 'Latest reply'}]}]
@@ -287,6 +311,30 @@ def mixed_sessions():
             detail_title, offset = bitmap(payload, 19, 32)
             assert detail_title == rows[open_code][1], 'Detail and list must render the same title'
             assert any(bitmap(payload, offset, 320)[0])
+
+            def claude_message(role, blocks):
+                return {'type': role, 'sessionId': native, 'timestamp': dt.datetime.now(dt.timezone.utc).isoformat(),
+                        'message': {'role': role, 'content': blocks}}
+
+            forms.append({'fields': [{'type': 'string'}, {'type': 'multiselect', 'hidden': True,
+                                                         'options': [{'value': 'hidden'}]}]})
+            transcript.write_text(json.dumps(claude_message('assistant', [
+                {'type': 'tool_use', 'name': 'AskUserQuestion', 'id': 'question', 'input': choices}
+            ])) + '\n')
+            selection = [{'value': 'apple'}, {'value': 'pear'}]
+            forms.append({'fields': [{'type': 'string', 'options': selection},
+                                     {'type': 'multiselect', 'options': selection}]})
+            pi_cache = events_dir / 'pi' / 'event.json'
+            pi_event = json.loads(pi_cache.read_text())
+            pi_cache.write_text(json.dumps(dict(pi_event, state='waitingForAnswer')))
+            waiting_ids = {open_code, claude, pi}
+            waiting = eventually(master, lambda rows: {key for key, row in rows.items() if row[0] == 5} == waiting_ids)
+            assert list(waiting) == list(rows), 'Waiting updates must preserve the selected row'
+            forms.pop()
+            with transcript.open('a') as file:
+                file.write(json.dumps(claude_message('user', [{'type': 'tool_result', 'tool_use_id': 'question'}])) + '\n')
+            pi_cache.write_text(json.dumps(pi_event))
+            eventually(master, lambda rows: set(rows) == ids and all(row[0] == 1 for row in rows.values()))
 
             now_ms = int(time.time() * 1000)
             info['time'] = {'busy': started, 'updated': now_ms, 'idle': now_ms}

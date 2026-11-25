@@ -2,7 +2,17 @@ import CryptoKit
 import Foundation
 
 enum AgentSessionState: UInt8 {
-    case running = 1, completed, failed, cancelled
+    case running = 1, completed, failed, cancelled, waitingForAnswer
+
+    var isActive: Bool { self == .running || self == .waitingForAnswer }
+
+    var listPriority: Int {
+        switch self {
+        case .waitingForAnswer: return 0
+        case .running: return 1
+        default: return 2
+        }
+    }
 }
 
 enum AgentSource: String {
@@ -45,10 +55,15 @@ struct AgentSession {
         return value
     }
 
+    static func hasQuestionChoices(_ input: [String: Any]?) -> Bool {
+        guard let questions = input?["questions"] as? [[String: Any]] else { return false }
+        return questions.contains { ($0["options"] as? [[String: Any]])?.isEmpty == false }
+    }
+
     static func listOrder(_ left: Self, _ right: Self) -> Bool {
-        let leftRunning = left.state == .running
-        let rightRunning = right.state == .running
-        if leftRunning != rightRunning { return leftRunning }
+        let leftPriority = left.state.listPriority
+        let rightPriority = right.state.listPriority
+        if leftPriority != rightPriority { return leftPriority < rightPriority }
         if left.updatedAt != right.updatedAt { return left.updatedAt > right.updatedAt }
         return left.id.uuidString < right.id.uuidString
     }
@@ -65,7 +80,7 @@ final class AgentSessions {
     private let hooks: HookSessions?
     private var observedSince: Date?
     private var visible: [UUID] = []
-    private var shownRunning: Set<UUID> = []
+    private var shownActive: Set<UUID> = []
     private var retained: [UUID: Date] = [:]
     private(set) var recent: [UUID: AgentSession] = [:]
 
@@ -83,12 +98,12 @@ final class AgentSessions {
         var candidates: [AgentSession] = []
         for row in sources.joined() {
             recent[row.id] = row
-            if row.state == .running {
+            if row.state.isActive {
                 retained[row.id] = nil
                 candidates.append(row)
             } else {
                 let expires = row.updatedAt.addingTimeInterval(Self.retainFor)
-                if expires > now, shownRunning.contains(row.id) || row.startedAt >= (observedSince ?? now) {
+                if expires > now, shownActive.contains(row.id) || row.startedAt >= (observedSince ?? now) {
                     retained[row.id] = expires
                 }
                 if retained[row.id] == expires { candidates.append(row) }
@@ -100,7 +115,7 @@ final class AgentSessions {
         visible = visible.filter { byID[$0] != nil }
         let previous = Set(visible)
         visible.append(contentsOf: ranked.map(\.id).filter { !previous.contains($0) })
-        shownRunning = Set(visible.filter { byID[$0]?.state == .running })
+        shownActive = Set(visible.filter { byID[$0]?.state.isActive == true })
         return sources.isEmpty ? nil : visible.compactMap { byID[$0] }
     }
 }

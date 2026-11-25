@@ -24,7 +24,13 @@ typedef enum {
     CODEX_COMPLETED,
     CODEX_FAILED,
     CODEX_CANCELLED,
+    CODEX_WAITING_FOR_ANSWER,
 } codex_state_t;
+
+static inline bool codex_state_is_active(uint8_t state)
+{
+    return state == CODEX_RUNNING || state == CODEX_WAITING_FOR_ANSWER;
+}
 
 typedef struct {
     uint8_t state;

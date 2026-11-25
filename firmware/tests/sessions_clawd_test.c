@@ -186,6 +186,28 @@ static void test_manual_walk(void)
     assert(pet.view.pose == CLAWD_WALKING && pet.patrol_ends_ms > end);
 }
 
+static void test_waiting_for_answer(void)
+{
+    sessions_clawd_t pet = {0};
+    codex_summary_t sessions = { .received_ms = 1000, .count = 1, .ids = {{9}}, .states = {CODEX_RUNNING} };
+    sessions_clawd_update(&pet, &sessions, false, 0, 1000);
+    sessions.states[0] = CODEX_WAITING_FOR_ANSWER;
+    sessions.received_ms = 1050;
+    sessions_clawd_update(&pet, &sessions, false, 0, 1050);
+    assert(!pet.running && pet.pending == SESSIONS_CLAWD_NONE && !pet.action_ends_ms);
+    sessions.states[0] = CODEX_RUNNING;
+    sessions.received_ms = 1100;
+    sessions_clawd_update(&pet, &sessions, false, 0, 1100);
+    assert(pet.running && pet.pending == SESSIONS_CLAWD_NONE && !pet.action_ends_ms);
+    sessions.states[0] = CODEX_WAITING_FOR_ANSWER;
+    sessions.received_ms = 1150;
+    sessions_clawd_update(&pet, &sessions, false, 0, 1150);
+    sessions.states[0] = CODEX_CANCELLED;
+    sessions.received_ms = 1200;
+    sessions_clawd_update(&pet, &sessions, false, 0, 1200);
+    assert(pet.action_ends_ms > 1200);
+}
+
 int main(void)
 {
     test_patrol();
@@ -193,6 +215,7 @@ int main(void)
     test_waiting_for_mac();
     test_connection_loss_and_recovery();
     test_manual_walk();
+    test_waiting_for_answer();
     const unsigned started = (1U << CLAWD_GROOVING) | (1U << CLAWD_JUGGLING) | (1U << CLAWD_EUREKA);
     const unsigned done = (1U << CLAWD_HAPPY) | (1U << CLAWD_COFFEE) | (1U << CLAWD_SNACK);
     const unsigned failed = (1U << CLAWD_DIZZY) | (1U << CLAWD_HAT) | (1U << CLAWD_JUGGLING);

@@ -45,8 +45,10 @@ static bool touch_event(agents_screen_t *screen, const lab_touch_state_t *touch)
 
 agents_screen_mode_t agents_screen_mode(const codex_summary_t *sessions, bool napping, int64_t now_ms)
 {
-    if (codex_summary_is_current(sessions, now_ms) && memchr(sessions->states, CODEX_RUNNING, sessions->count))
-        return AGENTS_SCREEN_KEEP_AWAKE;
+    if (codex_summary_is_current(sessions, now_ms)) {
+        for (unsigned row = 0; row < sessions->count; ++row)
+            if (codex_state_is_active(sessions->states[row])) return AGENTS_SCREEN_KEEP_AWAKE;
+    }
     return napping ? AGENTS_SCREEN_NAPPING : AGENTS_SCREEN_WAITING_FOR_NAP;
 }
 

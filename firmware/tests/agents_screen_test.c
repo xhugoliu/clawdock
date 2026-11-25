@@ -62,7 +62,7 @@ static void test_session_sync_and_wake(void)
 
     /* An active row wakes the panel, even when it is behind a finished row. */
     sessions.count = 2;
-    sessions.states[1] = CODEX_RUNNING;
+    sessions.states[1] = CODEX_WAITING_FOR_ANSWER;
     sessions.sources_unavailable = true;
     assert(!update_screen(&screen, agents_screen_mode(&sessions, true, now), now, false));
     sessions.sources_unavailable = false;
@@ -72,6 +72,8 @@ static void test_session_sync_and_wake(void)
     sessions.received_ms = now;
     assert(update_screen(&screen, agents_screen_mode(&sessions, true, now), now, false));
     assert(agents_screen_mode(&sessions, false, now + CODEX_TIMEOUT_MS) == AGENTS_SCREEN_KEEP_AWAKE);
+    sessions.states[1] = CODEX_RUNNING;
+    assert(agents_screen_mode(&sessions, false, now) == AGENTS_SCREEN_KEEP_AWAKE);
 
     /* The last running session ends, then Clawd walks back and starts napping. */
     now += MINUTE_MS;
